@@ -3,15 +3,15 @@
   "rewrites": [
     {
       "source": "/live/:path*",
-      "destination": "/api/streams-vercel?streamType=live&path=:path*"
+      "destination": "/api/stream-handler"
     },
     {
       "source": "/movie/:path*",
-      "destination": "/api/streams-vercel?streamType=movie&path=:path*"
+      "destination": "/api/stream-handler"
     },
     {
       "source": "/series/:path*",
-      "destination": "/api/streams-vercel?streamType=series&path=:path*"
+      "destination": "/api/stream-handler"
     },
     {
       "source": "/player_api.php",
