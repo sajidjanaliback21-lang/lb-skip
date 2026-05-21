@@ -278,6 +278,30 @@ const handleXtreamProxy = async (req: express.Request, res: express.Response) =>
       }
     }
 
+    // Intercept server_info in JSON to force routing stream requests through Express
+    if (rewrittenText.trim().startsWith("{")) {
+      try {
+        const obj = JSON.parse(rewrittenText);
+        if (obj && obj.server_info) {
+          obj.server_info.url = req.headers.host || "yourdomain.com";
+          let host = req.headers.host || "yourdomain.com";
+          if (host.includes(":")) {
+            obj.server_info.port = host.split(":")[1];
+            obj.server_info.server_protocol = "http";
+          } else {
+            obj.server_info.port = "443";
+            obj.server_info.server_protocol = "https";
+          }
+          if (obj.server_info.https_port) {
+            obj.server_info.https_port = "443";
+          }
+          rewrittenText = JSON.stringify(obj);
+        }
+      } catch (jsonErr) {
+        console.error("Express local JSON server_info patch error:", jsonErr);
+      }
+    }
+
     res.setHeader("Content-Type", contentType);
     res.setHeader("X-Replacement-Count", replacementCount.toString());
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -295,6 +319,76 @@ const handleXtreamProxy = async (req: express.Request, res: express.Response) =>
 app.all("/player_api.php", handleXtreamProxy);
 app.all("/get.php", handleXtreamProxy);
 app.all("/xmltv.php", handleXtreamProxy);
+
+// Express stream wildcard redirect interceptor for /live/*, /movie/*, and /series/*
+const handleStreamRedirect = async (req: express.Request, res: express.Response) => {
+  const pathParts = req.path.split("/");
+  // pathParts will look like ["", "live", "user", "pass", "123.ts"] or similar
+  const streamType = pathParts[1]; // "live" | "movie" | "series"
+  const streamPath = pathParts.slice(2).join("/");
+
+  if (!streamType || !streamPath) {
+    return res.status(400).send("Bad request parameters.");
+  }
+
+  const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "yourdomain.com";
+  let cleanDomain = rawCustomDomain;
+  if (cleanDomain.includes(":")) {
+    cleanDomain = cleanDomain.split(":")[0];
+  }
+
+  const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}`);
+  for (const [key, value] of Object.entries(req.query)) {
+    if (key !== "customDomain") {
+      targetUrl.searchParams.set(key, String(value));
+    }
+  }
+
+  try {
+    const response = await fetch(targetUrl.toString(), {
+      method: "GET",
+      headers: {
+        "User-Agent": (req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer") as string,
+        "Accept": (req.headers["accept"] || "*/*") as string,
+      },
+      redirect: "manual"
+    });
+
+    const locationHeader = response.headers.get("location");
+
+    if (locationHeader) {
+      let rewrittenLocation = locationHeader;
+      let replacementCount = 0;
+
+      for (const [ip, defaultSub] of Object.entries(INITIAL_MAPPINGS)) {
+        const subStr = defaultSub as string;
+        const prefix = subStr.split(".")[0];
+        const replacement = `${prefix}.${cleanDomain}`;
+
+        if (rewrittenLocation.includes(ip)) {
+          rewrittenLocation = rewrittenLocation.split(ip).join(replacement);
+          replacementCount++;
+        }
+      }
+
+      res.setHeader("X-Redirect-Rewritten", replacementCount > 0 ? "true" : "false");
+      res.setHeader("X-Redirect-Replacements", replacementCount.toString());
+      res.setHeader("Location", rewrittenLocation);
+      return res.status(302).end();
+    }
+
+    res.setHeader("Location", targetUrl.toString());
+    return res.status(302).end();
+  } catch (error: any) {
+    console.error("Express stream redirect fail:", error);
+    res.setHeader("Location", targetUrl.toString());
+    return res.status(302).end();
+  }
+};
+
+app.all("/live/*", handleStreamRedirect);
+app.all("/movie/*", handleStreamRedirect);
+app.all("/series/*", handleStreamRedirect);
 
 // Serve Static Frontent Client assets
 const startServer = async () => {

@@ -2,6 +2,18 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/live/:path*",
+      "destination": "/api/streams-vercel?streamType=live&path=:path*"
+    },
+    {
+      "source": "/movie/:path*",
+      "destination": "/api/streams-vercel?streamType=movie&path=:path*"
+    },
+    {
+      "source": "/series/:path*",
+      "destination": "/api/streams-vercel?streamType=series&path=:path*"
+    },
+    {
       "source": "/player_api.php",
       "destination": "/api/xtream-vercel?file=player_api.php"
     },

@@ -97,6 +97,31 @@ export default async function handler(req, res) {
       }
     }
 
+    // Intercept server_info in JSON to force routing through Vercel
+    if (rewrittenText.trim().startsWith("{")) {
+      try {
+        const obj = JSON.parse(rewrittenText);
+        if (obj && obj.server_info) {
+          // Force players to make stream quests through our current Vercel host proxy endpoints
+          obj.server_info.url = req.headers.host || "yourdomain.com";
+          let host = req.headers.host || "yourdomain.com";
+          if (host.includes(":")) {
+            obj.server_info.port = host.split(":")[1];
+            obj.server_info.server_protocol = "http";
+          } else {
+            obj.server_info.port = "443";
+            obj.server_info.server_protocol = "https";
+          }
+          if (obj.server_info.https_port) {
+            obj.server_info.https_port = "443";
+          }
+          rewrittenText = JSON.stringify(obj);
+        }
+      } catch (jsonErr) {
+        console.error("JSON parsing error for server_info injection:", jsonErr);
+      }
+    }
+
     // Return the modified content with corresponding headers back to user's IPTV client
     res.setHeader("Content-Type", contentType);
     res.setHeader("X-Replacement-Count", replacementCount.toString());
