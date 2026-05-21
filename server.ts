@@ -210,6 +210,92 @@ const handlePlaylistRewrite = async (req: express.Request, res: express.Response
 app.get("/api/playlist", handlePlaylistRewrite);
 app.get("/playlist", handlePlaylistRewrite);
 
+// Xtream Codes transparent proxy and rewrite middleware
+const handleXtreamProxy = async (req: express.Request, res: express.Response) => {
+  const file = req.path.substring(1) || "player_api.php";
+  const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}/${file}`);
+
+  for (const [key, value] of Object.entries(req.query)) {
+    targetUrl.searchParams.set(key, String(value));
+  }
+
+  const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "yourdomain.com";
+  let cleanDomain = rawCustomDomain;
+  if (cleanDomain.includes(":")) {
+    cleanDomain = cleanDomain.split(":")[0];
+  }
+
+  try {
+    const forwardHeaders: { [key: string]: string } = {
+      "User-Agent": (req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer") as string,
+      "Accept": (req.headers["accept"] || "*/*") as string,
+    };
+
+    if (req.headers["authorization"]) {
+      forwardHeaders["Authorization"] = req.headers["authorization"] as string;
+    }
+
+    const fetchOptions: any = {
+      method: req.method,
+      headers: forwardHeaders,
+    };
+
+    if (req.method === "POST" && req.body) {
+      if (typeof req.body === "string") {
+        fetchOptions.body = req.body;
+        if (req.headers["content-type"]) {
+          forwardHeaders["Content-Type"] = req.headers["content-type"] as string;
+        }
+      } else {
+        const formParams = new URLSearchParams();
+        for (const [k, v] of Object.entries(req.body)) {
+          formParams.append(k, String(v));
+        }
+        fetchOptions.body = formParams.toString();
+        forwardHeaders["Content-Type"] = "application/x-www-form-urlencoded";
+      }
+    }
+
+    const response = await fetch(targetUrl.toString(), fetchOptions);
+    const contentType = response.headers.get("content-type") || "text/plain";
+
+    const responseText = await response.text();
+    let rewrittenText = responseText;
+    let replacementCount = 0;
+
+    for (const [ip, defaultSub] of Object.entries(INITIAL_MAPPINGS)) {
+      const subStr = defaultSub as string;
+      const prefix = subStr.split(".")[0];
+      const replacement = `${prefix}.${cleanDomain}`;
+
+      const escapedIp = ip.replace(/\./g, "\\.");
+      const regex = new RegExp(escapedIp, "g");
+      const matches = (responseText.match(regex) || []).length;
+
+      if (matches > 0) {
+        replacementCount += matches;
+        rewrittenText = rewrittenText.split(ip).join(replacement);
+      }
+    }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("X-Replacement-Count", replacementCount.toString());
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+    return res.status(response.status).send(rewrittenText);
+  } catch (error: any) {
+    console.error("Express Xtream Proxy fail:", error);
+    return res.status(502).json({
+      error: "Xtream proxy mapping failure",
+      message: error.message || "Failed to reach main server."
+    });
+  }
+};
+
+app.all("/player_api.php", handleXtreamProxy);
+app.all("/get.php", handleXtreamProxy);
+app.all("/xmltv.php", handleXtreamProxy);
+
 // Serve Static Frontent Client assets
 const startServer = async () => {
   if (process.env.NODE_ENV !== "production") {
