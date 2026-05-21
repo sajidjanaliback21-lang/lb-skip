@@ -1,0 +1,6 @@
+{
+  "name": "IPTV Playlist Rewriter",
+  "description": "A high-performance IPTV Playlist URL rewriter that intercepts playlist requests, replaces load balancer IPs with custom subdomains, and guides users in playlist modification without media stream proxying.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

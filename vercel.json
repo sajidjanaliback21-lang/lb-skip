@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/playlist",
+      "destination": "/api/playlist-vercel"
+    },
+    {
+      "source": "/playlist",
+      "destination": "/api/playlist-vercel"
+    },
+    {
+      "source": "/api/stats",
+      "destination": "/api/stats-vercel"
+    },
+    {
+      "source": "/api/rewrite-raw",
+      "destination": "/api/rewrite-raw-vercel"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/$1"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Credentials", "value": "true" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,DELETE,PATCH,POST,PUT,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version" }
+      ]
+    }
+  ]
+}
