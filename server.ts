@@ -337,6 +337,11 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
     cleanDomain = cleanDomain.split(":")[0];
   }
 
+  // Avoid Vercel / local cloud app subdomains for LBs
+  if (cleanDomain.includes("vercel.app") || cleanDomain.includes("localhost") || cleanDomain.includes("run.app")) {
+    cleanDomain = "yourdomain.com";
+  }
+
   const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}`);
   for (const [key, value] of Object.entries(req.query)) {
     if (key !== "customDomain") {
@@ -369,6 +374,13 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
           rewrittenLocation = rewrittenLocation.split(ip).join(replacement);
           replacementCount++;
         }
+      }
+
+      // Force HTTP protocol on port 8080 (LBs do not have SSL)
+      if (rewrittenLocation.startsWith("https://")) {
+        rewrittenLocation = "http://" + rewrittenLocation.substring(8);
+      } else if (!rewrittenLocation.startsWith("http://")) {
+        rewrittenLocation = "http://" + rewrittenLocation;
       }
 
       res.setHeader("X-Redirect-Rewritten", replacementCount > 0 ? "true" : "false");

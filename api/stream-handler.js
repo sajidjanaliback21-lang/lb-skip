@@ -26,6 +26,11 @@ export default async function handler(req, res) {
     cleanDomain = cleanDomain.split(":")[0];
   }
 
+  // Avoid Vercel app subdomains for LBs
+  if (cleanDomain.includes("vercel.app") || cleanDomain.includes("localhost") || cleanDomain.includes("run.app")) {
+    cleanDomain = "yourdomain.com";
+  }
+
   try {
     // Manual redirect handling ensures we catch the 302 without consuming the heavy media payload weight
     const response = await fetch(targetUrl, {
@@ -53,6 +58,13 @@ export default async function handler(req, res) {
           rewrittenLocation = rewrittenLocation.split(ip).join(replacement);
           replacementCount++;
         }
+      }
+
+      // Force HTTP protocol on port 8080 (LBs do not have SSL)
+      if (rewrittenLocation.startsWith("https://")) {
+        rewrittenLocation = "http://" + rewrittenLocation.substring(8);
+      } else if (!rewrittenLocation.startsWith("http://")) {
+        rewrittenLocation = "http://" + rewrittenLocation;
       }
 
       res.setHeader("X-Redirect-Rewritten", replacementCount > 0 ? "true" : "false");
