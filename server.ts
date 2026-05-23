@@ -389,25 +389,10 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
       finalLocation = rewrittenLocation;
     }
 
-    if (streamType === "live") {
-      // Virtual HLS Wrapper: Return 200 OK with HLS content-type and stream URI in the body
-      const m3u8Content = `#EXTM3U\n#EXTINF:-1, Live Stream\n${finalLocation}\n`;
-      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      return res.status(200).send(m3u8Content);
-    }
-
     res.setHeader("Location", finalLocation);
     return res.status(302).end();
   } catch (error: any) {
     console.error("Express stream redirect fail:", error);
-    
-    if (streamType === "live") {
-      const m3u8Content = `#EXTM3U\n#EXTINF:-1, Live Stream\n${targetUrl.toString()}\n`;
-      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-      return res.status(200).send(m3u8Content);
-    }
-
     res.setHeader("Location", targetUrl.toString());
     return res.status(302).end();
   }
