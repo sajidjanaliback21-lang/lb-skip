@@ -83,11 +83,14 @@ export default async function handler(req, res) {
         }
       }
 
-      // Force HTTP protocol on port 8080 (LBs do not have SSL)
-      if (rewrittenLocation.startsWith("https://")) {
-        rewrittenLocation = "http://" + rewrittenLocation.substring(8);
-      } else if (!rewrittenLocation.startsWith("http://")) {
-        rewrittenLocation = "http://" + rewrittenLocation;
+      // Remove port :8080 from the rewritten load balancer URL since Cloudflare handles Origin port forwarding
+      rewrittenLocation = rewrittenLocation.replace(":8080", "");
+
+      // Force HTTPS protocol for secure Cloudflare proxied paths
+      if (rewrittenLocation.startsWith("http://")) {
+        rewrittenLocation = "https://" + rewrittenLocation.substring(7);
+      } else if (!rewrittenLocation.startsWith("https://")) {
+        rewrittenLocation = "https://" + rewrittenLocation;
       }
 
       res.setHeader("X-Redirect-Rewritten", replacementCount > 0 ? "true" : "false");
