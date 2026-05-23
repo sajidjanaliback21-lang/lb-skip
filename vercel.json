@@ -3,15 +3,15 @@
   "rewrites": [
     {
       "source": "/live/:path*",
-      "destination": "/api/stream-handler"
+      "destination": "/api/stream-handler?streamType=live&path=:path*"
     },
     {
       "source": "/movie/:path*",
-      "destination": "/api/stream-handler"
+      "destination": "/api/stream-handler?streamType=movie&path=:path*"
     },
     {
       "source": "/series/:path*",
-      "destination": "/api/stream-handler"
+      "destination": "/api/stream-handler?streamType=series&path=:path*"
     },
     {
       "source": "/player_api.php",

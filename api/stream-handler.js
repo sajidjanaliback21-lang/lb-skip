@@ -13,11 +13,33 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Get original request path and query parameters (e.g., /movie/user/pass/123.mp4?any=param)
-  const clientUrl = req.url || "";
+  // Get original request path structure from rewrites query parameters
+  const streamType = req.query.streamType;
+  const streamPath = req.query.path;
   
-  // Construct destination stream URL pointing to the IPTV Main Server on port 8080
-  const targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${clientUrl}`;
+  let targetUrl;
+  if (streamType && streamPath) {
+    // Reconstruct utilizing the rewrite parameters
+    const queryParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(req.query)) {
+      if (key !== "streamType" && key !== "path" && key !== "customDomain") {
+        queryParams.append(key, value);
+      }
+    }
+    const queryString = queryParams.toString();
+    const querySuffix = queryString ? `?${queryString}` : "";
+    targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}${querySuffix}`;
+  } else {
+    // Fallback if accessed directly or via another rewrite method
+    const clientUrl = req.url || "";
+    // If clientUrl starts with /api/stream-handler, try to extract from x-matched-path header or similar if present
+    const matchedPath = req.headers["x-matched-path"] || req.headers["x-original-url"] || clientUrl;
+    if (matchedPath && matchedPath.startsWith("/api/stream-handler")) {
+      targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${clientUrl}`;
+    } else {
+      targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${matchedPath}`;
+    }
+  }
 
   // Custom Domain deduction
   const rawCustomDomain = req.query.customDomain || req.headers.host || "hdsj.store";
