@@ -349,6 +349,11 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
     }
   }
 
+  // Parse and dynamically rewrite live TV MPEG-TS (.ts) streams to HLS (.m3u8) for maximum player compatibility
+  if (targetUrl.pathname.startsWith("/live/") && targetUrl.pathname.toLowerCase().endsWith(".ts")) {
+    targetUrl.pathname = targetUrl.pathname.slice(0, -3) + ".m3u8";
+  }
+
   try {
     const response = await fetch(targetUrl.toString(), {
       method: "GET",

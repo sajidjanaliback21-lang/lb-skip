@@ -17,7 +17,7 @@ export default async function handler(req, res) {
   const streamType = req.query.streamType;
   const streamPath = req.query.path;
   
-  let targetUrl;
+  let initialTargetUrl;
   if (streamType && streamPath) {
     // Reconstruct utilizing the rewrite parameters
     const queryParams = new URLSearchParams();
@@ -28,18 +28,25 @@ export default async function handler(req, res) {
     }
     const queryString = queryParams.toString();
     const querySuffix = queryString ? `?${queryString}` : "";
-    targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}${querySuffix}`;
+    initialTargetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}${querySuffix}`;
   } else {
     // Fallback if accessed directly or via another rewrite method
     const clientUrl = req.url || "";
     // If clientUrl starts with /api/stream-handler, try to extract from x-matched-path header or similar if present
     const matchedPath = req.headers["x-matched-path"] || req.headers["x-original-url"] || clientUrl;
     if (matchedPath && matchedPath.startsWith("/api/stream-handler")) {
-      targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${clientUrl}`;
+      initialTargetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${clientUrl}`;
     } else {
-      targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${matchedPath}`;
+      initialTargetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${matchedPath}`;
     }
   }
+
+  // Parse and dynamically rewrite live TV MPEG-TS (.ts) streams to HLS (.m3u8) for maximum player compatibility
+  const targetParsedUrl = new URL(initialTargetUrl);
+  if (targetParsedUrl.pathname.startsWith("/live/") && targetParsedUrl.pathname.toLowerCase().endsWith(".ts")) {
+    targetParsedUrl.pathname = targetParsedUrl.pathname.slice(0, -3) + ".m3u8";
+  }
+  const targetUrl = targetParsedUrl.toString();
 
   // Custom Domain deduction
   const rawCustomDomain = req.query.customDomain || req.headers.host || "hdsj.store";
