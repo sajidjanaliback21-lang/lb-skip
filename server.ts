@@ -6,6 +6,19 @@ import { INITIAL_MAPPINGS, DEFAULT_MAIN_SERVER_IP } from "./src/lb-mapping.js";
 
 dotenv.config();
 
+const LBS = [
+  "lb1.hdsj.store",
+  "lb2.hdsj.store",
+  "lb3.hdsj.store",
+  "lb4.hdsj.store",
+  "lb5.hdsj.store",
+  "lb6.hdsj.store"
+];
+
+function getRandomLb() {
+  return LBS[Math.floor(Math.random() * LBS.length)];
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -210,19 +223,13 @@ const handlePlaylistRewrite = async (req: express.Request, res: express.Response
 app.get("/api/playlist", handlePlaylistRewrite);
 app.get("/playlist", handlePlaylistRewrite);
 
-// Xtream Codes transparent proxy and rewrite middleware
+// Xtream Codes API Proxy and Playlist rewriter
 const handleXtreamProxy = async (req: express.Request, res: express.Response) => {
   const file = req.path.substring(1) || "player_api.php";
-  const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}/${file}`);
+  const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}:8080/${file}`);
 
   for (const [key, value] of Object.entries(req.query)) {
     targetUrl.searchParams.set(key, String(value));
-  }
-
-  const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "hdsj.store";
-  let cleanDomain = rawCustomDomain;
-  if (cleanDomain.includes(":")) {
-    cleanDomain = cleanDomain.split(":")[0];
   }
 
   try {
@@ -263,42 +270,57 @@ const handleXtreamProxy = async (req: express.Request, res: express.Response) =>
     let rewrittenText = responseText;
     let replacementCount = 0;
 
-    for (const [ip, defaultSub] of Object.entries(INITIAL_MAPPINGS)) {
-      const subStr = defaultSub as string;
-      const prefix = subStr.split(".")[0];
-      const replacement = `${prefix}.${cleanDomain}`;
-
-      const escapedIp = ip.replace(/\./g, "\\.");
-      const regex = new RegExp(escapedIp, "g");
-      const matches = (responseText.match(regex) || []).length;
-
-      if (matches > 0) {
-        replacementCount += matches;
-        rewrittenText = rewrittenText.split(ip).join(replacement);
-      }
-    }
-
-    // Intercept server_info in JSON to force routing stream requests through Express
-    if (rewrittenText.trim().startsWith("{")) {
-      try {
-        const obj = JSON.parse(rewrittenText);
-        if (obj && obj.server_info) {
-          obj.server_info.url = req.headers.host || "hdsj.store";
-          let host = req.headers.host || "hdsj.store";
-          if (host.includes(":")) {
-            obj.server_info.port = host.split(":")[1];
-            obj.server_info.server_protocol = "http";
-          } else {
-            obj.server_info.port = "443";
-            obj.server_info.server_protocol = "https";
+    if (file === "get.php" || rewrittenText.trim().startsWith("#EXTM3U")) {
+      // Dynamic load-balancing across the lines of an M3U file
+      const lines = rewrittenText.split("\n");
+      const parsedLines = lines.map(line => {
+        if (line.includes(DEFAULT_MAIN_SERVER_IP)) {
+          const randomLb = getRandomLb();
+          // First force http
+          let updatedLine = line.split("https://" + DEFAULT_MAIN_SERVER_IP).join("http://" + DEFAULT_MAIN_SERVER_IP);
+          updatedLine = updatedLine.split(DEFAULT_MAIN_SERVER_IP).join(randomLb);
+          
+          // Ensure port :8080 is appended correctly
+          if (updatedLine.includes(randomLb) && !updatedLine.includes(randomLb + ":8080")) {
+            const portRegex = new RegExp(`${randomLb}:\\d+`, "g");
+            if (updatedLine.match(portRegex)) {
+              updatedLine = updatedLine.replace(portRegex, `${randomLb}:8080`);
+            } else {
+              updatedLine = updatedLine.replace(randomLb, `${randomLb}:8080`);
+            }
           }
-          if (obj.server_info.https_port) {
-            obj.server_info.https_port = "443";
+          replacementCount++;
+          return updatedLine;
+        }
+        return line;
+      });
+      rewrittenText = parsedLines.join("\n");
+    } else {
+      // For general non-M3U/JSON responses, use a single randomized balancer
+      const selectedLb = getRandomLb();
+
+      // Clean up https and replace IP with the selected load balancer domain
+      rewrittenText = rewrittenText.split("https://" + DEFAULT_MAIN_SERVER_IP).join("http://" + DEFAULT_MAIN_SERVER_IP);
+      const countBefore = (rewrittenText.match(new RegExp(DEFAULT_MAIN_SERVER_IP, "g")) || []).length;
+      rewrittenText = rewrittenText.split(DEFAULT_MAIN_SERVER_IP).join(selectedLb);
+      replacementCount += countBefore;
+
+      // Intercept and patch server_info block in JSON response
+      if (rewrittenText.trim().startsWith("{") || rewrittenText.trim().startsWith("[")) {
+        try {
+          const obj = JSON.parse(rewrittenText);
+          if (obj && obj.server_info) {
+            obj.server_info.url = selectedLb;
+            obj.server_info.port = "8080";
+            obj.server_info.server_protocol = "http";
+            if (obj.server_info.https_port) {
+              obj.server_info.https_port = "8080";
+            }
           }
           rewrittenText = JSON.stringify(obj);
+        } catch (jsonErr) {
+          console.error("JSON parsing error for server_info modification:", jsonErr);
         }
-      } catch (jsonErr) {
-        console.error("Express local JSON server_info patch error:", jsonErr);
       }
     }
 
@@ -320,136 +342,10 @@ app.all("/player_api.php", handleXtreamProxy);
 app.all("/get.php", handleXtreamProxy);
 app.all("/xmltv.php", handleXtreamProxy);
 
-// Express stream wildcard redirect interceptor for /live/*, /movie/*, and /series/*
+// Express stream wildcard redirect interceptor - returning 404 for media routes
 const handleStreamRedirect = async (req: express.Request, res: express.Response) => {
-  const pathParts = req.path.split("/");
-  // pathParts will look like ["", "live", "user", "pass", "123.ts"] or similar
-  const streamType = pathParts[1]; // "live" | "movie" | "series"
-  let streamPath = pathParts.slice(2).join("/");
-
-  if (!streamType || !streamPath) {
-    return res.status(400).send("Bad request parameters.");
-  }
-
-  // Extension Fallback Check: check if the request path has a media extension
-  const pathPartClean = streamPath.split("?")[0].toLowerCase();
-  const hasMediaExtension = pathPartClean.endsWith(".ts") || 
-                            pathPartClean.endsWith(".mp4") || 
-                            pathPartClean.endsWith(".mkv") || 
-                            pathPartClean.endsWith(".m3u8");
-  if (!hasMediaExtension) {
-    streamPath = streamPath + ".ts";
-  }
-
-  const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "hdsj.store";
-  let cleanDomain = rawCustomDomain;
-  if (cleanDomain.includes(":")) {
-    cleanDomain = cleanDomain.split(":")[0];
-  }
-
-  // Avoid Vercel / local cloud app subdomains for LBs
-  if (cleanDomain.includes("vercel.app") || cleanDomain.includes("localhost") || cleanDomain.includes("run.app")) {
-    cleanDomain = "hdsj.store";
-  }
-
-  const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}`);
-  for (const [key, value] of Object.entries(req.query)) {
-    if (key !== "customDomain") {
-      targetUrl.searchParams.set(key, String(value));
-    }
-  }
-
-  try {
-    const response = await fetch(targetUrl.toString(), {
-      method: "GET",
-      headers: {
-        "User-Agent": (req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer") as string,
-        "Accept": (req.headers["accept"] || "*/*") as string,
-      },
-      redirect: "manual"
-    });
-
-    const locationHeader = response.headers.get("location");
-    let finalLocation = targetUrl.toString();
-
-    if (locationHeader) {
-      let rewrittenLocation = locationHeader;
-      let replacementCount = 0;
-
-      for (const [ip, defaultSub] of Object.entries(INITIAL_MAPPINGS)) {
-        const subStr = defaultSub as string;
-        const prefix = subStr.split(".")[0];
-        const replacement = `${prefix}.${cleanDomain}`;
-
-        if (rewrittenLocation.includes(ip)) {
-          rewrittenLocation = rewrittenLocation.split(ip).join(replacement);
-          replacementCount++;
-        }
-      }
-
-      // Force HTTP protocol on port 8080 for DNS-only/Grey Cloud direct Load Balancer routing
-      try {
-        const parsedUrl = new URL(rewrittenLocation);
-        parsedUrl.protocol = "http:";
-        parsedUrl.port = "8080";
-        rewrittenLocation = parsedUrl.toString();
-      } catch (e) {
-        const urlMatch = rewrittenLocation.match(/^(http:\/\/|https:\/\/)?([^\/]+)(.*)$/);
-        if (urlMatch) {
-          let host = urlMatch[2];
-          const path = urlMatch[3] || "";
-          if (host.includes(":")) {
-            host = host.split(":")[0];
-          }
-          rewrittenLocation = `http://${host}:8080${path}`;
-        }
-      }
-
-      res.setHeader("X-Redirect-Rewritten", replacementCount > 0 ? "true" : "false");
-      res.setHeader("X-Redirect-Replacements", replacementCount.toString());
-      finalLocation = rewrittenLocation;
-    }
-
-    // Determine if this is a Live TV stream request
-    const isLiveStream = (streamType === "live") || 
-                         (req.path && req.path.includes("/live/"));
-
-    if (isLiveStream) {
-      try {
-        const parsedFinal = new URL(finalLocation);
-        let pathname = parsedFinal.pathname;
-        const lowercasePath = pathname.toLowerCase();
-        const hasExtension = lowercasePath.endsWith(".ts") ||
-                             lowercasePath.endsWith(".mp4") ||
-                             lowercasePath.endsWith(".mkv") ||
-                             lowercasePath.endsWith(".m3u8");
-        if (!hasExtension) {
-          parsedFinal.pathname = pathname + ".ts";
-        }
-        finalLocation = parsedFinal.toString();
-      } catch (urlErr) {
-        console.error("URL parsing error in live check:", urlErr);
-        const urlParts = finalLocation.split("?");
-        let pathPart = urlParts[0];
-        const querySuffix = urlParts[1] ? `?${urlParts[1]}` : "";
-        const lowercasePath = pathPart.toLowerCase();
-        const hasExtension = lowercasePath.endsWith(".ts") ||
-                             lowercasePath.endsWith(".mp4") ||
-                             lowercasePath.endsWith(".mkv") ||
-                             lowercasePath.endsWith(".m3u8");
-        if (!hasExtension) {
-          finalLocation = pathPart + ".ts" + querySuffix;
-        }
-      }
-    }
-
-    res.setHeader("Location", finalLocation);
-    return res.status(302).end();
-  } catch (error: any) {
-    console.error("Express stream redirect fail:", error);
-    res.setHeader("Location", targetUrl.toString());
-    return res.status(302).end();
-  }
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  return res.status(404).send("Not Found");
 };
 
 app.all("/live/*", handleStreamRedirect);

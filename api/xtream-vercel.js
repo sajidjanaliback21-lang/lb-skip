@@ -1,5 +1,18 @@
-// Vercel Serverless Function to act as a transparent Xtream Codes proxy
+// Vercel Serverless Function to act as a transparent Xtream Codes proxy and API Playlist Rewriter
 import { INITIAL_MAPPINGS, DEFAULT_MAIN_SERVER_IP } from "../src/lb-mapping.js";
+
+const LBS = [
+  "lb1.hdsj.store",
+  "lb2.hdsj.store",
+  "lb3.hdsj.store",
+  "lb4.hdsj.store",
+  "lb5.hdsj.store",
+  "lb6.hdsj.store"
+];
+
+function getRandomLb() {
+  return LBS[Math.floor(Math.random() * LBS.length)];
+}
 
 export default async function handler(req, res) {
   // Set CORS headers so standard IPTV players don't face browser-level restrictions
@@ -14,26 +27,19 @@ export default async function handler(req, res) {
   // Retrieve the requested Xtream Codes endpoint file name ('player_api.php', 'get.php', or 'xmltv.php')
   const file = req.query.file || "player_api.php";
 
-  // Reconstruct target URL pointing to the IPTV Main Server
-  const targetBase = `http://${DEFAULT_MAIN_SERVER_IP}`;
+  // Reconstruct target URL pointing to the IPTV Main Server on Port 8080
+  const targetBase = `http://${DEFAULT_MAIN_SERVER_IP}:8080`;
   const targetUrl = new URL(`${targetBase}/${file}`);
 
-  // Copy all incoming query parameters (except the helper 'file' parameter)
+  // Copy all incoming query parameters (except the helper 'file' and 'customDomain' parameters)
   for (const [key, value] of Object.entries(req.query)) {
-    if (key !== "file") {
+    if (key !== "file" && key !== "customDomain") {
       targetUrl.searchParams.set(key, value);
     }
   }
 
-  // Determine customDomain using query, headers, or default
-  const rawCustomDomain = req.query.customDomain || req.headers.host || "hdsj.store";
-  let cleanDomain = rawCustomDomain;
-  if (cleanDomain.includes(":")) {
-    cleanDomain = cleanDomain.split(":")[0];
-  }
-
   try {
-    // Prep headers to send upstream (strip Content-Encoding to avoid compressed body parsing complexities)
+    // Prep headers to send upstream (Ensure you pass exact User-Agent from the client)
     const forwardHeaders = {
       "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
       "Accept": req.headers["accept"] || "*/*",
@@ -79,46 +85,58 @@ export default async function handler(req, res) {
     let rewrittenText = responseText;
     let replacementCount = 0;
 
-    // Direct String scan and replace for each mapping rule configured
-    for (const [ip, defaultSub] of Object.entries(INITIAL_MAPPINGS)) {
-      const subStr = defaultSub;
-      const prefix = subStr.split(".")[0];
-      const replacement = `${prefix}.${cleanDomain}`;
-
-      // Escape IP for count check regex
-      const escapedIp = ip.replace(/\./g, "\\.");
-      const regex = new RegExp(escapedIp, "g");
-      const matches = (responseText.match(regex) || []).length;
-
-      if (matches > 0) {
-        replacementCount += matches;
-        // Global replacement
-        rewrittenText = rewrittenText.split(ip).join(replacement);
-      }
-    }
-
-    // Intercept server_info in JSON to force routing through Vercel
-    if (rewrittenText.trim().startsWith("{")) {
-      try {
-        const obj = JSON.parse(rewrittenText);
-        if (obj && obj.server_info) {
-          // Force players to make stream quests through our current Vercel host proxy endpoints
-          obj.server_info.url = req.headers.host || "hdsj.store";
-          let host = req.headers.host || "hdsj.store";
-          if (host.includes(":")) {
-            obj.server_info.port = host.split(":")[1];
-            obj.server_info.server_protocol = "http";
-          } else {
-            obj.server_info.port = "443";
-            obj.server_info.server_protocol = "https";
+    if (file === "get.php" || rewrittenText.trim().startsWith("#EXTM3U")) {
+      // Dynamic load-balancing across the lines of an M3U file
+      const lines = rewrittenText.split("\n");
+      const parsedLines = lines.map(line => {
+        if (line.includes(DEFAULT_MAIN_SERVER_IP)) {
+          const randomLb = getRandomLb();
+          // First force http
+          let updatedLine = line.split("https://" + DEFAULT_MAIN_SERVER_IP).join("http://" + DEFAULT_MAIN_SERVER_IP);
+          updatedLine = updatedLine.split(DEFAULT_MAIN_SERVER_IP).join(randomLb);
+          
+          // Ensure port :8080 is appended correctly
+          if (updatedLine.includes(randomLb) && !updatedLine.includes(randomLb + ":8080")) {
+            const portRegex = new RegExp(`${randomLb}:\\d+`, "g");
+            if (updatedLine.match(portRegex)) {
+              updatedLine = updatedLine.replace(portRegex, `${randomLb}:8080`);
+            } else {
+              updatedLine = updatedLine.replace(randomLb, `${randomLb}:8080`);
+            }
           }
-          if (obj.server_info.https_port) {
-            obj.server_info.https_port = "443";
+          replacementCount++;
+          return updatedLine;
+        }
+        return line;
+      });
+      rewrittenText = parsedLines.join("\n");
+    } else {
+      // For general non-M3U/JSON responses, use a single randomized balancer
+      const selectedLb = getRandomLb();
+
+      // Clean up https and replace IP with the selected load balancer domain
+      rewrittenText = rewrittenText.split("https://" + DEFAULT_MAIN_SERVER_IP).join("http://" + DEFAULT_MAIN_SERVER_IP);
+      
+      const countBefore = (rewrittenText.match(new RegExp(DEFAULT_MAIN_SERVER_IP, "g")) || []).length;
+      rewrittenText = rewrittenText.split(DEFAULT_MAIN_SERVER_IP).join(selectedLb);
+      replacementCount += countBefore;
+
+      // Intercept and patch server_info block in JSON response
+      if (rewrittenText.trim().startsWith("{") || rewrittenText.trim().startsWith("[")) {
+        try {
+          const obj = JSON.parse(rewrittenText);
+          if (obj && obj.server_info) {
+            obj.server_info.url = selectedLb;
+            obj.server_info.port = "8080";
+            obj.server_info.server_protocol = "http";
+            if (obj.server_info.https_port) {
+              obj.server_info.https_port = "8080";
+            }
           }
           rewrittenText = JSON.stringify(obj);
+        } catch (jsonErr) {
+          console.error("JSON parsing error for server_info modification:", jsonErr);
         }
-      } catch (jsonErr) {
-        console.error("JSON parsing error for server_info injection:", jsonErr);
       }
     }
 
