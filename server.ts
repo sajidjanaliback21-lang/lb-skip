@@ -219,7 +219,7 @@ const handleXtreamProxy = async (req: express.Request, res: express.Response) =>
     targetUrl.searchParams.set(key, String(value));
   }
 
-  const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "yourdomain.com";
+  const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "hdsj.store";
   let cleanDomain = rawCustomDomain;
   if (cleanDomain.includes(":")) {
     cleanDomain = cleanDomain.split(":")[0];
@@ -283,8 +283,8 @@ const handleXtreamProxy = async (req: express.Request, res: express.Response) =>
       try {
         const obj = JSON.parse(rewrittenText);
         if (obj && obj.server_info) {
-          obj.server_info.url = req.headers.host || "yourdomain.com";
-          let host = req.headers.host || "yourdomain.com";
+          obj.server_info.url = req.headers.host || "hdsj.store";
+          let host = req.headers.host || "hdsj.store";
           if (host.includes(":")) {
             obj.server_info.port = host.split(":")[1];
             obj.server_info.server_protocol = "http";
@@ -331,7 +331,7 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
     return res.status(400).send("Bad request parameters.");
   }
 
-  const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "yourdomain.com";
+  const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "hdsj.store";
   let cleanDomain = rawCustomDomain;
   if (cleanDomain.includes(":")) {
     cleanDomain = cleanDomain.split(":")[0];
@@ -339,7 +339,7 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
 
   // Avoid Vercel / local cloud app subdomains for LBs
   if (cleanDomain.includes("vercel.app") || cleanDomain.includes("localhost") || cleanDomain.includes("run.app")) {
-    cleanDomain = "yourdomain.com";
+    cleanDomain = "hdsj.store";
   }
 
   const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}`);

@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   const targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${clientUrl}`;
 
   // Custom Domain deduction
-  const rawCustomDomain = req.query.customDomain || req.headers.host || "yourdomain.com";
+  const rawCustomDomain = req.query.customDomain || req.headers.host || "hdsj.store";
   let cleanDomain = rawCustomDomain;
   if (cleanDomain.includes(":")) {
     cleanDomain = cleanDomain.split(":")[0];
@@ -28,7 +28,7 @@ export default async function handler(req, res) {
 
   // Avoid Vercel app subdomains for LBs
   if (cleanDomain.includes("vercel.app") || cleanDomain.includes("localhost") || cleanDomain.includes("run.app")) {
-    cleanDomain = "yourdomain.com";
+    cleanDomain = "hdsj.store";
   }
 
   try {

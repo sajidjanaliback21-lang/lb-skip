@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   }
 
   // Determine customDomain using query, headers, or default
-  const rawCustomDomain = req.query.customDomain || req.headers.host || "yourdomain.com";
+  const rawCustomDomain = req.query.customDomain || req.headers.host || "hdsj.store";
   let cleanDomain = rawCustomDomain;
   if (cleanDomain.includes(":")) {
     cleanDomain = cleanDomain.split(":")[0];
@@ -103,8 +103,8 @@ export default async function handler(req, res) {
         const obj = JSON.parse(rewrittenText);
         if (obj && obj.server_info) {
           // Force players to make stream quests through our current Vercel host proxy endpoints
-          obj.server_info.url = req.headers.host || "yourdomain.com";
-          let host = req.headers.host || "yourdomain.com";
+          obj.server_info.url = req.headers.host || "hdsj.store";
+          let host = req.headers.host || "hdsj.store";
           if (host.includes(":")) {
             obj.server_info.port = host.split(":")[1];
             obj.server_info.server_protocol = "http";

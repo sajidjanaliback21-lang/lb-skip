@@ -23,7 +23,7 @@ export default function handler(req, res) {
         id: "vrc-1b8",
         timestamp: new Date().toISOString(),
         sourceUrl: `http://${DEFAULT_MAIN_SERVER_IP}/get.php?username=demoplay&password=demopass`,
-        customDomain: "yourdomain.com",
+        customDomain: "hdsj.store",
         elapsedMs: 42,
         replacements: 18,
         originalSize: 45000,

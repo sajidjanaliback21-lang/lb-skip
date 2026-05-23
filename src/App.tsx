@@ -47,14 +47,14 @@ export default function App() {
   
   // Interactive test states
   const [rawText, setRawText] = useState(`#EXTM3U\n#EXTINF:-1,Sample Live Stream Channel 1\nhttp://103.169.98.238:8080/live/user/pwd/123.ts\n#EXTINF:-1,Sample Live Stream Channel 2 (Alternative LB)\nhttp://45.148.147.213/live/user/pwd/104.ts\n#EXTINF:-1,Movie Server Direct Node\nhttp://181.215.178.23:8000/movie/user/pwd/99.mp4`);
-  const [customDomainInput, setCustomDomainInput] = useState("yourdomain.com");
+  const [customDomainInput, setCustomDomainInput] = useState("hdsj.store");
   const [isRewriting, setIsRewriting] = useState(false);
   const [rewrittenResult, setRewrittenResult] = useState<any | null>(null);
   const [copiedRaw, setCopiedRaw] = useState(false);
 
   // Link generator states
   const [inputUrl, setInputUrl] = useState(`http://45.142.0.21/get.php?username=demouser&password=easyiptv12&output=ts`);
-  const [generatorDomain, setGeneratorDomain] = useState("yourdomain.com");
+  const [generatorDomain, setGeneratorDomain] = useState("hdsj.store");
   const [generatedLink, setGeneratedLink] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -248,7 +248,7 @@ export default function App() {
                       type="text" 
                       value={generatorDomain} 
                       onChange={(e) => setGeneratorDomain(e.target.value)}
-                      placeholder="yourdomain.com (Leave blank for default mapping)"
+                      placeholder="hdsj.store (Leave blank for default mapping)"
                       className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 px-3 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 transition"
                       id="input-target-domain"
                     />
@@ -257,7 +257,7 @@ export default function App() {
                     <div className="h-2 w-2 rounded-full bg-green-400 animate-pulse"></div>
                     <div className="text-xs">
                       <span className="font-bold text-slate-300">Default Mapping Rule:</span>
-                      <p className="text-slate-500">Changes load balancer nodes into <code className="text-indigo-300 text-[10px] font-mono">lb*.yourdomain.com</code></p>
+                      <p className="text-slate-500">Changes load balancer nodes into <code className="text-indigo-300 text-[10px] font-mono">lb*.hdsj.store</code></p>
                     </div>
                   </div>
                 </div>
@@ -332,7 +332,7 @@ export default function App() {
                       type="text" 
                       value={customDomainInput}
                       onChange={(e) => setCustomDomainInput(e.target.value)}
-                      placeholder="yourdomain.com"
+                      placeholder="hdsj.store"
                       className="bg-transparent text-sm font-semibold text-indigo-300 focus:outline-none w-full"
                     />
                   </div>
@@ -439,7 +439,7 @@ export default function App() {
                     <div key={ip} className="bg-slate-950 p-2.5 rounded border border-slate-800 flex items-center justify-between text-xs hover:border-indigo-500/20 transition">
                       <div>
                         <span className="font-mono text-[11px] text-emerald-400 block">{ip}</span>
-                        <span className="font-mono text-[10px] text-indigo-300">{domainStr.replace("yourdomain.com", generatorDomain || "yourdomain.com")}</span>
+                        <span className="font-mono text-[10px] text-indigo-300">{domainStr.replace("hdsj.store", generatorDomain || "hdsj.store")}</span>
                       </div>
                       <div className="text-right">
                         <span className="bg-indigo-950 text-indigo-300 text-[10px] px-2 py-0.5 rounded border border-indigo-500/20">
