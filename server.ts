@@ -402,6 +402,28 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
       finalLocation = rewrittenLocation;
     }
 
+    // Determine if this is a Live TV stream request
+    const isLiveStream = (streamType === "live") || 
+                         (req.path && req.path.includes("/live/"));
+
+    if (isLiveStream) {
+      try {
+        const parsedFinal = new URL(finalLocation);
+        let pathname = parsedFinal.pathname;
+        const lowercasePath = pathname.toLowerCase();
+        const hasExtension = lowercasePath.endsWith(".ts") ||
+                             lowercasePath.endsWith(".mp4") ||
+                             lowercasePath.endsWith(".mkv") ||
+                             lowercasePath.endsWith(".m3u8");
+        if (!hasExtension) {
+          parsedFinal.pathname = pathname + ".ts";
+        }
+        finalLocation = parsedFinal.toString();
+      } catch (urlErr) {
+        console.error("URL parsing error in live check:", urlErr);
+      }
+    }
+
     res.setHeader("Location", finalLocation);
     return res.status(302).end();
   } catch (error: any) {
