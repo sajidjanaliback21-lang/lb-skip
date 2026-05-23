@@ -112,14 +112,22 @@ export default async function handler(req, res) {
         }
       }
 
-      // Remove port :8080 from the rewritten load balancer URL since Cloudflare handles Origin port forwarding
-      rewrittenLocation = rewrittenLocation.replace(":8080", "");
-
-      // Force HTTPS protocol for secure Cloudflare proxied paths
-      if (rewrittenLocation.startsWith("http://")) {
-        rewrittenLocation = "https://" + rewrittenLocation.substring(7);
-      } else if (!rewrittenLocation.startsWith("https://")) {
-        rewrittenLocation = "https://" + rewrittenLocation;
+      // Force HTTP protocol on port 8080 for DNS-only/Grey Cloud direct Load Balancer routing
+      try {
+        const parsedUrl = new URL(rewrittenLocation);
+        parsedUrl.protocol = "http:";
+        parsedUrl.port = "8080";
+        rewrittenLocation = parsedUrl.toString();
+      } catch (e) {
+        const urlMatch = rewrittenLocation.match(/^(http:\/\/|https:\/\/)?([^\/]+)(.*)$/);
+        if (urlMatch) {
+          let host = urlMatch[2];
+          const path = urlMatch[3] || "";
+          if (host.includes(":")) {
+            host = host.split(":")[0];
+          }
+          rewrittenLocation = `http://${host}:8080${path}`;
+        }
       }
 
       res.setHeader("X-Redirect-Rewritten", replacementCount > 0 ? "true" : "false");
@@ -148,6 +156,17 @@ export default async function handler(req, res) {
         finalLocation = parsedFinal.toString();
       } catch (urlErr) {
         console.error("URL parsing error in live check:", urlErr);
+        const urlParts = finalLocation.split("?");
+        let pathPart = urlParts[0];
+        const querySuffix = urlParts[1] ? `?${urlParts[1]}` : "";
+        const lowercasePath = pathPart.toLowerCase();
+        const hasExtension = lowercasePath.endsWith(".ts") ||
+                             lowercasePath.endsWith(".mp4") ||
+                             lowercasePath.endsWith(".mkv") ||
+                             lowercasePath.endsWith(".m3u8");
+        if (!hasExtension) {
+          finalLocation = pathPart + ".ts" + querySuffix;
+        }
       }
     }
 
