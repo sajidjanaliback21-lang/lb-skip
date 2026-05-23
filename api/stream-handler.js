@@ -65,6 +65,7 @@ export default async function handler(req, res) {
     });
 
     const locationHeader = response.headers.get("location");
+    let finalLocation = targetUrl;
 
     if (locationHeader) {
       let rewrittenLocation = locationHeader;
@@ -91,17 +92,39 @@ export default async function handler(req, res) {
 
       res.setHeader("X-Redirect-Rewritten", replacementCount > 0 ? "true" : "false");
       res.setHeader("X-Redirect-Replacements", replacementCount.toString());
-      res.setHeader("Location", rewrittenLocation);
-      
-      return res.status(302).end();
+      finalLocation = rewrittenLocation;
     }
 
-    // Direct fallback redirect
-    res.setHeader("Location", targetUrl);
+    // Determine if this is a Live TV stream request
+    const isLiveStream = (streamType === "live") || 
+                         (req.url && req.url.includes("/live/")) || 
+                         (req.headers["x-matched-path"] && req.headers["x-matched-path"].includes("/live/")) ||
+                         (req.headers["x-original-url"] && req.headers["x-original-url"].includes("/live/"));
+
+    if (isLiveStream) {
+      // Virtual HLS Wrapper: Return 200 OK with HLS content-type and stream URI in the body
+      const m3u8Content = `#EXTM3U\n#EXTINF:-1, Live Stream\n${finalLocation}\n`;
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      return res.status(200).send(m3u8Content);
+    }
+
+    // For VOD (/movie/* and /series/*): return HTTP 302 Redirect
+    res.setHeader("Location", finalLocation);
     return res.status(302).end();
 
   } catch (error) {
     console.error("Vercel Stream Interception Error:", error);
+    
+    // Fallback if live stream
+    const isLiveStream = (streamType === "live") || 
+                         (req.url && req.url.includes("/live/"));
+    if (isLiveStream) {
+      const m3u8Content = `#EXTM3U\n#EXTINF:-1, Live Stream\n${targetUrl}\n`;
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      return res.status(200).send(m3u8Content);
+    }
+
     res.setHeader("Location", targetUrl);
     return res.status(302).end();
   }
