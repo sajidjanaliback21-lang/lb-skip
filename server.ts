@@ -325,10 +325,20 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
   const pathParts = req.path.split("/");
   // pathParts will look like ["", "live", "user", "pass", "123.ts"] or similar
   const streamType = pathParts[1]; // "live" | "movie" | "series"
-  const streamPath = pathParts.slice(2).join("/");
+  let streamPath = pathParts.slice(2).join("/");
 
   if (!streamType || !streamPath) {
     return res.status(400).send("Bad request parameters.");
+  }
+
+  // Extension Fallback Check: check if the request path has a media extension
+  const pathPartClean = streamPath.split("?")[0].toLowerCase();
+  const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                            pathPartClean.endsWith(".mp4") || 
+                            pathPartClean.endsWith(".mkv") || 
+                            pathPartClean.endsWith(".m3u8");
+  if (!hasMediaExtension) {
+    streamPath = streamPath + ".ts";
   }
 
   const rawCustomDomain = (req.query.customDomain as string) || req.headers.host || "hdsj.store";

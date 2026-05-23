@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   // Get original request path structure from rewrites query parameters
   const streamType = req.query.streamType;
-  const streamPath = req.query.path;
+  let streamPath = req.query.path;
   
   let targetUrl;
   if (streamType && streamPath) {
@@ -28,17 +28,46 @@ export default async function handler(req, res) {
     }
     const queryString = queryParams.toString();
     const querySuffix = queryString ? `?${queryString}` : "";
+
+    // Extension Fallback Check: check if the request path has a media extension
+    const pathPartClean = streamPath.split("?")[0].toLowerCase();
+    const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                              pathPartClean.endsWith(".mp4") || 
+                              pathPartClean.endsWith(".mkv") || 
+                              pathPartClean.endsWith(".m3u8");
+    if (!hasMediaExtension) {
+      streamPath = streamPath + ".ts";
+    }
+
     targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}${querySuffix}`;
   } else {
     // Fallback if accessed directly or via another rewrite method
     const clientUrl = req.url || "";
     // If clientUrl starts with /api/stream-handler, try to extract from x-matched-path header or similar if present
     const matchedPath = req.headers["x-matched-path"] || req.headers["x-original-url"] || clientUrl;
-    if (matchedPath && matchedPath.startsWith("/api/stream-handler")) {
-      targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${clientUrl}`;
-    } else {
-      targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${matchedPath}`;
+    let baseMatchedPath = matchedPath && matchedPath.startsWith("/api/stream-handler") ? clientUrl : matchedPath;
+
+    // Apply extension check to baseMatchedPath if it falls inside stream routes
+    const urlParts = baseMatchedPath.split("?");
+    let pathPart = urlParts[0];
+    const querySuffix = urlParts[1] ? `?${urlParts[1]}` : "";
+
+    const pathPartClean = pathPart.toLowerCase();
+    const isStreamRoute = pathPartClean.includes("/live/") || 
+                          pathPartClean.includes("/movie/") || 
+                          pathPartClean.includes("/series/");
+
+    if (isStreamRoute) {
+      const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                                pathPartClean.endsWith(".mp4") || 
+                                pathPartClean.endsWith(".mkv") || 
+                                pathPartClean.endsWith(".m3u8");
+      if (!hasMediaExtension) {
+        pathPart = pathPart + ".ts";
+      }
     }
+
+    targetUrl = `http://${DEFAULT_MAIN_SERVER_IP}:8080${pathPart}${querySuffix}`;
   }
 
   // Custom Domain deduction
