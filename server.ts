@@ -370,10 +370,36 @@ app.all("/player_api.php", handleXtreamProxy);
 app.all("/get.php", handleXtreamProxy);
 app.all("/xmltv.php", handleXtreamProxy);
 
-// Express stream wildcard redirect interceptor - returning 404 for media routes
+// Express stream wildcard redirect interceptor
 const handleStreamRedirect = async (req: express.Request, res: express.Response) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  return res.status(404).send("Not Found");
+
+  const pathParts = req.path.split("/");
+  // pathParts will look like ["", "live", "user", "pass", "123.ts"] or similar
+  const streamType = pathParts[1]; // "live" | "movie" | "series"
+  let streamPath = pathParts.slice(2).join("/");
+
+  if (!streamType || !streamPath) {
+    return res.status(400).send("Bad request parameters.");
+  }
+
+  // Extension Fallback Check: check if the request path has a media extension
+  const pathPartClean = streamPath.split("?")[0].toLowerCase();
+  const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                            pathPartClean.endsWith(".mp4") || 
+                            pathPartClean.endsWith(".mkv") || 
+                            pathPartClean.endsWith(".m3u8");
+  if (!hasMediaExtension && streamType === "live") {
+    streamPath = streamPath + ".ts";
+  }
+
+  const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}`);
+  for (const [key, value] of Object.entries(req.query)) {
+    targetUrl.searchParams.set(key, String(value));
+  }
+
+  res.setHeader("Location", targetUrl.toString());
+  return res.status(302).end();
 };
 
 app.all("/live/*", handleStreamRedirect);
