@@ -176,7 +176,15 @@ const handlePlaylistRewrite = async (req: express.Request, res: express.Response
       if (matches > 0) {
         replacementTotal += matches;
         stats.ipHits[ip] = (stats.ipHits[ip] || 0) + matches;
+        
+        // Replace IP:8080 first
+        rewritten = rewritten.split(`${ip}:8080`).join(replacement);
+        // Replace raw IP as fallback
         rewritten = rewritten.split(ip).join(replacement);
+        
+        // Strip any trailing load-balancer ports (like lbX.hdsj.store:8080)
+        const portRegex = new RegExp(`${replacement.replace(/\./g, "\\.")}:\\d+`, "g");
+        rewritten = rewritten.replace(portRegex, replacement);
       }
     }
 
@@ -291,18 +299,15 @@ const handleXtreamProxy = async (req: express.Request, res: express.Response) =>
         for (const targetIp of targetIps) {
           if (updatedLine.includes(targetIp)) {
             const randomLb = getRandomLb();
-            // First force http
-            updatedLine = updatedLine.split("https://" + targetIp).join("http://" + targetIp);
+            // Replace <targetIp>:8080 with just <randomLb> (stripping the port)
+            updatedLine = updatedLine.split(`${targetIp}:8080`).join(randomLb);
+            // Replace any other raw <targetIp> with <randomLb>
             updatedLine = updatedLine.split(targetIp).join(randomLb);
             
-            // Ensure port :8080 is appended correctly
-            if (updatedLine.includes(randomLb) && !updatedLine.includes(randomLb + ":8080")) {
-              const portRegex = new RegExp(`${randomLb}:\\d+`, "g");
-              if (updatedLine.match(portRegex)) {
-                updatedLine = updatedLine.replace(portRegex, `${randomLb}:8080`);
-              } else {
-                updatedLine = updatedLine.replace(randomLb, `${randomLb}:8080`);
-              }
+            // Strictly make sure no :8080 port remains attached to the load balancer domain
+            const portRegex = new RegExp(`${randomLb.replace(/\./g, "\\.")}:\\d+`, "g");
+            if (updatedLine.match(portRegex)) {
+              updatedLine = updatedLine.replace(portRegex, randomLb);
             }
             replacementCount++;
           }

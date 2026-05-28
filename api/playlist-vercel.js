@@ -55,7 +55,15 @@ export default async function handler(req, res) {
       const matches = (originalContent.match(new RegExp(escapedIp, "g")) || []).length;
       if (matches > 0) {
         replacementTotal += matches;
+        
+        // Replace IP:8080 first
+        rewritten = rewritten.split(`${ip}:8080`).join(replacement);
+        // Replace raw IP as fallback
         rewritten = rewritten.split(ip).join(replacement);
+        
+        // Strip any trailing load-balancer ports (like lbX.hdsj.store:8080)
+        const portRegex = new RegExp(`${replacement.replace(/\./g, "\\.")}:\\d+`, "g");
+        rewritten = rewritten.replace(portRegex, replacement);
       }
     }
 

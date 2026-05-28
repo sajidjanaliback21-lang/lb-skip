@@ -106,18 +106,15 @@ export default async function handler(req, res) {
         for (const targetIp of targetIps) {
           if (updatedLine.includes(targetIp)) {
             const randomLb = getRandomLb();
-            // First force http
-            updatedLine = updatedLine.split("https://" + targetIp).join("http://" + targetIp);
+            // Replace <targetIp>:8080 with just <randomLb> (stripping the port)
+            updatedLine = updatedLine.split(`${targetIp}:8080`).join(randomLb);
+            // Replace any other raw <targetIp> with <randomLb>
             updatedLine = updatedLine.split(targetIp).join(randomLb);
             
-            // Ensure port :8080 is appended correctly
-            if (updatedLine.includes(randomLb) && !updatedLine.includes(randomLb + ":8080")) {
-              const portRegex = new RegExp(`${randomLb}:\\d+`, "g");
-              if (updatedLine.match(portRegex)) {
-                updatedLine = updatedLine.replace(portRegex, `${randomLb}:8080`);
-              } else {
-                updatedLine = updatedLine.replace(randomLb, `${randomLb}:8080`);
-              }
+            // Strictly make sure no :8080 port remains attached to the load balancer domain
+            const portRegex = new RegExp(`${randomLb.replace(/\./g, "\\.")}:\\d+`, "g");
+            if (updatedLine.match(portRegex)) {
+              updatedLine = updatedLine.replace(portRegex, randomLb);
             }
             replacementCount++;
           }
