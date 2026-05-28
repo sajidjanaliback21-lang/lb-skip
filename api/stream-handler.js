@@ -19,21 +19,28 @@ function rewriteLocationHeader(locationUrl) {
     const urlObj = new URL(locationUrl);
     const host = urlObj.hostname;
     
+    let matched = false;
     if (REDIRECT_MAP[host]) {
       urlObj.hostname = REDIRECT_MAP[host];
       urlObj.port = "";
+      urlObj.protocol = "https:";
+      matched = true;
     } else {
       for (const [ip, domain] of Object.entries(REDIRECT_MAP)) {
         if (host === ip) {
           urlObj.hostname = domain;
           urlObj.port = "";
+          urlObj.protocol = "https:";
+          matched = true;
           break;
         }
       }
-      if (host === "149.18.66.28" || host === "45.142.0.21" || host.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+      if (!matched && (host === "149.18.66.28" || host === "45.142.0.21" || host.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/))) {
         const mappedDomain = REDIRECT_MAP[host] || REDIRECT_MAP["149.18.66.28"];
         urlObj.hostname = mappedDomain;
         urlObj.port = "";
+        urlObj.protocol = "https:";
+        matched = true;
       }
     }
     return urlObj.toString();
@@ -43,6 +50,11 @@ function rewriteLocationHeader(locationUrl) {
       modified = modified.replace(new RegExp(`${ip}:8080`, "g"), domain);
       modified = modified.replace(new RegExp(`${ip}:\\d+`, "g"), domain);
       modified = modified.replace(new RegExp(ip, "g"), domain);
+    }
+    for (const domain of Object.values(REDIRECT_MAP)) {
+      if (modified.includes(domain)) {
+        modified = modified.replace("http://", "https://");
+      }
     }
     return modified;
   }
