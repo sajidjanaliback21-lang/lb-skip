@@ -85,52 +85,74 @@ export default async function handler(req, res) {
     let rewrittenText = responseText;
     let replacementCount = 0;
 
+    const targetIps = ["149.18.66.28", "45.142.0.21"];
+    const proxyHost = req.headers.host || "hdsj.store";
+    const proxyProto = req.headers["x-forwarded-proto"] || "http";
+    
+    // Split proxy host to determine correct host and port
+    let hostOnly = proxyHost;
+    let portOnly = proxyProto === "https" ? "443" : "80";
+    if (proxyHost.includes(":")) {
+      const parts = proxyHost.split(":");
+      hostOnly = parts[0];
+      portOnly = parts[1];
+    }
+
     if (file === "get.php" || rewrittenText.trim().startsWith("#EXTM3U")) {
       // Dynamic load-balancing across the lines of an M3U file
       const lines = rewrittenText.split("\n");
       const parsedLines = lines.map(line => {
-        if (line.includes(DEFAULT_MAIN_SERVER_IP)) {
-          const randomLb = getRandomLb();
-          // First force http
-          let updatedLine = line.split("https://" + DEFAULT_MAIN_SERVER_IP).join("http://" + DEFAULT_MAIN_SERVER_IP);
-          updatedLine = updatedLine.split(DEFAULT_MAIN_SERVER_IP).join(randomLb);
-          
-          // Ensure port :8080 is appended correctly
-          if (updatedLine.includes(randomLb) && !updatedLine.includes(randomLb + ":8080")) {
-            const portRegex = new RegExp(`${randomLb}:\\d+`, "g");
-            if (updatedLine.match(portRegex)) {
-              updatedLine = updatedLine.replace(portRegex, `${randomLb}:8080`);
-            } else {
-              updatedLine = updatedLine.replace(randomLb, `${randomLb}:8080`);
+        let updatedLine = line;
+        for (const targetIp of targetIps) {
+          if (updatedLine.includes(targetIp)) {
+            const randomLb = getRandomLb();
+            // First force http
+            updatedLine = updatedLine.split("https://" + targetIp).join("http://" + targetIp);
+            updatedLine = updatedLine.split(targetIp).join(randomLb);
+            
+            // Ensure port :8080 is appended correctly
+            if (updatedLine.includes(randomLb) && !updatedLine.includes(randomLb + ":8080")) {
+              const portRegex = new RegExp(`${randomLb}:\\d+`, "g");
+              if (updatedLine.match(portRegex)) {
+                updatedLine = updatedLine.replace(portRegex, `${randomLb}:8080`);
+              } else {
+                updatedLine = updatedLine.replace(randomLb, `${randomLb}:8080`);
+              }
             }
+            replacementCount++;
           }
-          replacementCount++;
-          return updatedLine;
         }
-        return line;
+        return updatedLine;
       });
       rewrittenText = parsedLines.join("\n");
     } else {
-      // For general non-M3U/JSON responses, use a single randomized balancer
-      const selectedLb = getRandomLb();
+      // For general non-M3U/JSON responses (e.g. player_api.php), target both IPs and replace them with the proxy host (req.headers.host)
+      for (const targetIp of targetIps) {
+        // Clean up any https protocol for this IP
+        rewrittenText = rewrittenText.split("https://" + targetIp).join("http://" + targetIp);
 
-      // Clean up https and replace IP with the selected load balancer domain
-      rewrittenText = rewrittenText.split("https://" + DEFAULT_MAIN_SERVER_IP).join("http://" + DEFAULT_MAIN_SERVER_IP);
-      
-      const countBefore = (rewrittenText.match(new RegExp(DEFAULT_MAIN_SERVER_IP, "g")) || []).length;
-      rewrittenText = rewrittenText.split(DEFAULT_MAIN_SERVER_IP).join(selectedLb);
-      replacementCount += countBefore;
+        // First look for IP:8080 and replace it with proxyHost cleanly to avoid trailing port 8080 mismatch
+        const ipWithPort = `${targetIp}:8080`;
+        const countWithPort = (rewrittenText.match(new RegExp(ipWithPort.replace(/\./g, "\\."), "g")) || []).length;
+        rewrittenText = rewrittenText.split(ipWithPort).join(proxyHost);
+        replacementCount += countWithPort;
+
+        // Then look for raw IP and replace it with proxyHost
+        const countRaw = (rewrittenText.match(new RegExp(targetIp.replace(/\./g, "\\."), "g")) || []).length;
+        rewrittenText = rewrittenText.split(targetIp).join(proxyHost);
+        replacementCount += countRaw;
+      }
 
       // Intercept and patch server_info block in JSON response
       if (rewrittenText.trim().startsWith("{") || rewrittenText.trim().startsWith("[")) {
         try {
           const obj = JSON.parse(rewrittenText);
           if (obj && obj.server_info) {
-            obj.server_info.url = selectedLb;
-            obj.server_info.port = "8080";
-            obj.server_info.server_protocol = "http";
+            obj.server_info.url = hostOnly;
+            obj.server_info.port = portOnly;
+            obj.server_info.server_protocol = proxyProto;
             if (obj.server_info.https_port) {
-              obj.server_info.https_port = "8080";
+              obj.server_info.https_port = proxyProto === "https" ? portOnly : "443";
             }
           }
           rewrittenText = JSON.stringify(obj);
