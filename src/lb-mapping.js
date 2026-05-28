@@ -3,7 +3,7 @@
  * Easily update the mappings or the default main server IP for node balancing.
  */
 
-export const DEFAULT_MAIN_SERVER_IP = "45.142.0.21";
+export const DEFAULT_MAIN_SERVER_IP = "149.18.66.28";
 
 export const INITIAL_MAPPINGS = {
   "103.169.98.238": "lb1.hdsj.store",

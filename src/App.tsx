@@ -53,7 +53,7 @@ export default function App() {
   const [copiedRaw, setCopiedRaw] = useState(false);
 
   // Link generator states
-  const [inputUrl, setInputUrl] = useState(`http://45.142.0.21/get.php?username=demouser&password=easyiptv12&output=ts`);
+  const [inputUrl, setInputUrl] = useState(`http://149.18.66.28/get.php?username=demouser&password=easyiptv12&output=ts`);
   const [generatorDomain, setGeneratorDomain] = useState("hdsj.store");
   const [generatedLink, setGeneratedLink] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
@@ -226,7 +226,7 @@ export default function App() {
                       type="text" 
                       value={inputUrl} 
                       onChange={(e) => setInputUrl(e.target.value)}
-                      placeholder="e.g., http://45.142.0.21/get.php?username=XXX&password=XXX&output=ts"
+                      placeholder="e.g., http://149.18.66.28/get.php?username=XXX&password=XXX&output=ts"
                       className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-3 pr-10 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 transition"
                       id="input-original-url"
                     />
