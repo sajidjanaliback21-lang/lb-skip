@@ -3,6 +3,51 @@
 
 import { DEFAULT_MAIN_SERVER_IP } from "../src/lb-mapping.js";
 
+const REDIRECT_MAP = {
+  "103.169.98.238": "lb1.hdsj.store",
+  "45.148.147.213": "lb2.hdsj.store",
+  "45.88.0.176": "lb3.hdsj.store",
+  "181.215.178.154": "lb4.hdsj.store",
+  "45.159.92.158": "lb5.hdsj.store",
+  "181.215.178.23": "lb6.hdsj.store",
+  "149.18.66.28": "lb1.hdsj.store"
+};
+
+function rewriteLocationHeader(locationUrl) {
+  if (!locationUrl) return locationUrl;
+  try {
+    const urlObj = new URL(locationUrl);
+    const host = urlObj.hostname;
+    
+    if (REDIRECT_MAP[host]) {
+      urlObj.hostname = REDIRECT_MAP[host];
+      urlObj.port = "";
+    } else {
+      for (const [ip, domain] of Object.entries(REDIRECT_MAP)) {
+        if (host === ip) {
+          urlObj.hostname = domain;
+          urlObj.port = "";
+          break;
+        }
+      }
+      if (host === "149.18.66.28" || host === "45.142.0.21" || host.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        const mappedDomain = REDIRECT_MAP[host] || REDIRECT_MAP["149.18.66.28"];
+        urlObj.hostname = mappedDomain;
+        urlObj.port = "";
+      }
+    }
+    return urlObj.toString();
+  } catch (err) {
+    let modified = locationUrl;
+    for (const [ip, domain] of Object.entries(REDIRECT_MAP)) {
+      modified = modified.replace(new RegExp(`${ip}:8080`, "g"), domain);
+      modified = modified.replace(new RegExp(`${ip}:\\d+`, "g"), domain);
+      modified = modified.replace(new RegExp(ip, "g"), domain);
+    }
+    return modified;
+  }
+}
+
 export default async function handler(req, res) {
   // CORS Headers
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -49,7 +94,37 @@ export default async function handler(req, res) {
     }
   }
 
-  res.setHeader("Location", targetUrl.toString());
-  return res.status(302).end();
+  try {
+    const forwardHeaders = {
+      "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
+      "Accept": req.headers["accept"] || "*/*"
+    };
+
+    const response = await fetch(targetUrl.toString(), {
+      method: "GET",
+      headers: forwardHeaders,
+      redirect: "manual" // Prevent auto-following of redirects
+    });
+
+    if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
+      const originalLocation = response.headers.get("location");
+      if (originalLocation) {
+        const rewrittenLocation = rewriteLocationHeader(originalLocation);
+        res.setHeader("Location", rewrittenLocation);
+        return res.status(302).end();
+      }
+    }
+
+    // fallback if no redirect header was found or it was a non-redirect status
+    const finalFallback = rewriteLocationHeader(targetUrl.toString());
+    res.setHeader("Location", finalFallback);
+    return res.status(302).end();
+  } catch (err) {
+    console.error("Error in stream-handler redirect intercept:", err);
+    // fallback on error
+    const finalFallback = rewriteLocationHeader(targetUrl.toString());
+    res.setHeader("Location", finalFallback);
+    return res.status(302).end();
+  }
 }
 
