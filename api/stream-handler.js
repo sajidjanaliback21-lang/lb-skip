@@ -60,15 +60,16 @@ function rewriteLocationHeader(locationUrl, streamType = "live", isDownload = fa
     const isVod = (type === "movie" || type === "series");
     
     if (isVod && isDownload) {
-      // Forcefully preserve or rewrite the file extension inside urlObj.pathname to .mkv
-      if (!pathname.toLowerCase().endsWith(".mkv")) {
+      // Forcefully rewrite the file extension inside urlObj.pathname to .mp4, and append download=true
+      if (!pathname.toLowerCase().endsWith(".mp4")) {
         const extRegex = /\.[a-zA-Z0-9]+$/i;
         if (extRegex.test(pathname)) {
-          pathname = pathname.replace(extRegex, ".mkv");
+          pathname = pathname.replace(extRegex, ".mp4");
         } else {
-          pathname = pathname + ".mkv";
+          pathname = pathname + ".mp4";
         }
       }
+      urlObj.searchParams.set("download", "true");
     } else if (isVod) {
       // Forcefully rewrite the file extension inside urlObj.pathname to .m3u8
       if (!pathname.toLowerCase().endsWith(".m3u8")) {
@@ -113,14 +114,20 @@ function rewriteLocationHeader(locationUrl, streamType = "live", isDownload = fa
       let beforeQuery = queryParts[0];
       
       if (isVod && isDownload) {
-        if (!beforeQuery.toLowerCase().endsWith(".mkv")) {
+        if (!beforeQuery.toLowerCase().endsWith(".mp4")) {
           const extRegex = /\.[a-zA-Z0-9]+$/i;
           if (extRegex.test(beforeQuery)) {
-            beforeQuery = beforeQuery.replace(extRegex, ".mkv");
+            beforeQuery = beforeQuery.replace(extRegex, ".mp4");
           } else {
-            beforeQuery = beforeQuery + ".mkv";
+            beforeQuery = beforeQuery + ".mp4";
           }
         }
+        const queryPartsCleanArray = queryParts.slice(1);
+        const queryParams = new URLSearchParams(queryPartsCleanArray.join("&"));
+        queryParams.set("download", "true");
+        const newQueryString = queryParams.toString();
+        modified = beforeQuery + (newQueryString ? "?" + newQueryString : "");
+        return modified;
       } else if (isVod) {
         if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
           const extRegex = /\.[a-zA-Z0-9]+$/i;
@@ -233,6 +240,53 @@ export default async function handler(req, res) {
     // Backend Translation: change the .mkv extension back to .mp4 (so the origin server responds correctly)
     const mkvRegex = /\.mkv$/i;
     streamPath = streamPath.replace(mkvRegex, ".mp4");
+    
+    const targetIp = DEFAULT_MAIN_SERVER_IP || "149.18.66.28";
+    const targetUrl = new URL(`http://${targetIp}:8080/${streamType}/${streamPath}`);
+    
+    // Forward query parameters
+    for (const [key, value] of Object.entries(req.query)) {
+      if (key !== "streamType" && key !== "path" && key !== "customDomain") {
+        if (Array.isArray(value)) {
+          targetUrl.searchParams.set(key, String(value[0]));
+        } else {
+          targetUrl.searchParams.set(key, String(value));
+        }
+      }
+    }
+    
+    try {
+      const forwardHeaders = {
+        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
+        "Accept": req.headers["accept"] || "*/*",
+        "X-Forwarded-For": req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || ""
+      };
+
+      const response = await fetch(targetUrl.toString(), {
+        method: "GET",
+        headers: forwardHeaders,
+        redirect: "manual"
+      });
+
+      if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
+        const originalLocation = response.headers.get("location");
+        if (originalLocation) {
+          const rewrittenLocation = rewriteLocationHeader(originalLocation, streamType, isDownload);
+          res.setHeader("Location", rewrittenLocation);
+          return res.status(302).end();
+        }
+      }
+
+      // If origin responded with non-redirect (e.g. 200), we still redirect to rewritten target as load balancer
+      const rewrittenTargetUrl = rewriteLocationHeader(targetUrl.toString(), streamType, isDownload);
+      res.setHeader("Location", rewrittenTargetUrl);
+      return res.status(302).end();
+    } catch (err) {
+      console.error("Error in stream-handler download redirect:", err);
+      const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType, isDownload);
+      res.setHeader("Location", finalFallback);
+      return res.status(302).end();
+    }
   }
 
   const targetIp = DEFAULT_MAIN_SERVER_IP || "149.18.66.28";
