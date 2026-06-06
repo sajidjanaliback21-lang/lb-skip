@@ -55,12 +55,21 @@ function rewriteLocationHeader(locationUrl, streamType = "live", isDownload = fa
       }
     }
 
-    // Rewrite path file extension depending on stream type
     let pathname = urlObj.pathname;
-    const isVod = (type === "movie" || type === "series");
     
-    if (isVod && isDownload) {
-      // Forcefully rewrite the file extension inside urlObj.pathname to .mp4, and append download=true
+    if (type === "live") {
+      // 1. For LIVE TV: MUST retain the original .ts extension and DO NOT append download=true.
+      const pathPartClean = pathname.split("?")[0].toLowerCase();
+      const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                                pathPartClean.endsWith(".mp4") || 
+                                pathPartClean.endsWith(".mkv") || 
+                                pathPartClean.endsWith(".m3u8");
+      if (!hasMediaExtension) {
+        pathname = pathname + ".ts";
+      }
+      urlObj.searchParams.delete("download");
+    } else if (isDownload) {
+      // 3. For VOD DOWNLOADS: Replace .mkv with .mp4 in the final Location redirect and MUST append download=true.
       if (!pathname.toLowerCase().endsWith(".mp4")) {
         const extRegex = /\.[a-zA-Z0-9]+$/i;
         if (extRegex.test(pathname)) {
@@ -70,8 +79,8 @@ function rewriteLocationHeader(locationUrl, streamType = "live", isDownload = fa
         }
       }
       urlObj.searchParams.set("download", "true");
-    } else if (isVod) {
-      // Forcefully rewrite the file extension inside urlObj.pathname to .m3u8
+    } else {
+      // 2. For VOD STREAMING: Force Auto-HLS (ALWAYS replace extension in final Location redirect to .m3u8). DO NOT append download=true.
       if (!pathname.toLowerCase().endsWith(".m3u8")) {
         const extRegex = /\.[a-zA-Z0-9]+$/i;
         if (extRegex.test(pathname)) {
@@ -80,19 +89,10 @@ function rewriteLocationHeader(locationUrl, streamType = "live", isDownload = fa
           pathname = pathname + ".m3u8";
         }
       }
-    } else {
-      // Live TV: Do NOT force .m3u8. If no media extension is present, append .ts
-      const pathPartClean = pathname.split("?")[0].toLowerCase();
-      const hasMediaExtension = pathPartClean.endsWith(".ts") || 
-                                pathPartClean.endsWith(".mp4") || 
-                                pathPartClean.endsWith(".mkv") || 
-                                pathPartClean.endsWith(".m3u8");
-      if (!hasMediaExtension) {
-        pathname = pathname + ".ts";
-      }
+      urlObj.searchParams.delete("download");
     }
-    urlObj.pathname = pathname;
 
+    urlObj.pathname = pathname;
     return urlObj.toString();
   } catch (err) {
     let modified = locationUrl;
@@ -107,37 +107,13 @@ function rewriteLocationHeader(locationUrl, streamType = "live", isDownload = fa
       }
     }
 
-    // Fallback string manipulation to ensure correct extension in error catch block
     try {
-      const isVod = (type === "movie" || type === "series");
       const queryParts = modified.split("?");
       let beforeQuery = queryParts[0];
-      
-      if (isVod && isDownload) {
-        if (!beforeQuery.toLowerCase().endsWith(".mp4")) {
-          const extRegex = /\.[a-zA-Z0-9]+$/i;
-          if (extRegex.test(beforeQuery)) {
-            beforeQuery = beforeQuery.replace(extRegex, ".mp4");
-          } else {
-            beforeQuery = beforeQuery + ".mp4";
-          }
-        }
-        const queryPartsCleanArray = queryParts.slice(1);
-        const queryParams = new URLSearchParams(queryPartsCleanArray.join("&"));
-        queryParams.set("download", "true");
-        const newQueryString = queryParams.toString();
-        modified = beforeQuery + (newQueryString ? "?" + newQueryString : "");
-        return modified;
-      } else if (isVod) {
-        if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
-          const extRegex = /\.[a-zA-Z0-9]+$/i;
-          if (extRegex.test(beforeQuery)) {
-            beforeQuery = beforeQuery.replace(extRegex, ".m3u8");
-          } else {
-            beforeQuery = beforeQuery + ".m3u8";
-          }
-        }
-      } else {
+      const queryPartsCleanArray = queryParts.slice(1);
+      const queryParams = new URLSearchParams(queryPartsCleanArray.join("&"));
+
+      if (type === "live") {
         const pathPartClean = beforeQuery.toLowerCase();
         const hasMediaExtension = pathPartClean.endsWith(".ts") || 
                                   pathPartClean.endsWith(".mp4") || 
@@ -146,9 +122,31 @@ function rewriteLocationHeader(locationUrl, streamType = "live", isDownload = fa
         if (!hasMediaExtension) {
           beforeQuery = beforeQuery + ".ts";
         }
+        queryParams.delete("download");
+      } else if (isDownload) {
+        if (!beforeQuery.toLowerCase().endsWith(".mp4")) {
+          const extRegex = /\.[a-zA-Z0-9]+$/i;
+          if (extRegex.test(beforeQuery)) {
+            beforeQuery = beforeQuery.replace(extRegex, ".mp4");
+          } else {
+            beforeQuery = beforeQuery + ".mp4";
+          }
+        }
+        queryParams.set("download", "true");
+      } else {
+        if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
+          const extRegex = /\.[a-zA-Z0-9]+$/i;
+          if (extRegex.test(beforeQuery)) {
+            beforeQuery = beforeQuery.replace(extRegex, ".m3u8");
+          } else {
+            beforeQuery = beforeQuery + ".m3u8";
+          }
+        }
+        queryParams.delete("download");
       }
-      queryParts[0] = beforeQuery;
-      modified = queryParts.join("?");
+
+      const newQueryString = queryParams.toString();
+      modified = beforeQuery + (newQueryString ? "?" + newQueryString : "");
     } catch (e) {}
 
     return modified;
@@ -222,75 +220,39 @@ export default async function handler(req, res) {
     streamPath = streamPath.join("/");
   }
 
-  // Extension Fallback Check: append .ts for live stream if no extension is present
   const pathPartClean = streamPath.split("?")[0].toLowerCase();
-  const hasMediaExtension = pathPartClean.endsWith(".ts") || 
-                            pathPartClean.endsWith(".mp4") || 
-                            pathPartClean.endsWith(".mkv") || 
-                            pathPartClean.endsWith(".m3u8");
-  if (!hasMediaExtension && streamType === "live") {
-    streamPath = streamPath + ".ts";
-  }
-
-  // Force Download Logic:
-  // Bypass Auto-HLS for Downloads: If an incoming request for a Movie or Series ends with .mkv, DO NOT convert it to .m3u8.
-  const isDownload = pathPartClean.endsWith(".mkv") && (streamType === "movie" || streamType === "series");
   
-  if (isDownload) {
-    // Backend Translation: change the .mkv extension back to .mp4 (so the origin server responds correctly)
-    const mkvRegex = /\.mkv$/i;
-    streamPath = streamPath.replace(mkvRegex, ".mp4");
-    
-    const targetIp = DEFAULT_MAIN_SERVER_IP || "149.18.66.28";
-    const targetUrl = new URL(`http://${targetIp}:8080/${streamType}/${streamPath}`);
-    
-    // Forward query parameters
-    for (const [key, value] of Object.entries(req.query)) {
-      if (key !== "streamType" && key !== "path" && key !== "customDomain") {
-        if (Array.isArray(value)) {
-          targetUrl.searchParams.set(key, String(value[0]));
-        } else {
-          targetUrl.searchParams.set(key, String(value));
-        }
-      }
+  const isLive = streamType === "live";
+  const isVodDownload = (streamType === "movie" || streamType === "series") && pathPartClean.endsWith(".mkv");
+  const isVodStreaming = (streamType === "movie" || streamType === "series") && !pathPartClean.endsWith(".mkv");
+
+  // Determine headers to proxy.
+  // ALWAYS pass client's real IP (X-Forwarded-For) to Main Server.
+  const clientIp = req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || "";
+  const forwardHeaders = {
+    "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
+    "Accept": req.headers["accept"] || "*/*",
+    "X-Forwarded-For": clientIp
+  };
+
+  let forwardStreamPath = streamPath;
+
+  if (isLive) {
+    // 1. For LIVE TV: Retain the original .ts extension or append if missing
+    const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                              pathPartClean.endsWith(".mp4") || 
+                              pathPartClean.endsWith(".mkv") || 
+                              pathPartClean.endsWith(".m3u8");
+    if (!hasMediaExtension) {
+      forwardStreamPath = streamPath + ".ts";
     }
-    
-    try {
-      const forwardHeaders = {
-        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
-        "Accept": req.headers["accept"] || "*/*",
-        "X-Forwarded-For": req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || ""
-      };
-
-      const response = await fetch(targetUrl.toString(), {
-        method: "GET",
-        headers: forwardHeaders,
-        redirect: "manual"
-      });
-
-      if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
-        const originalLocation = response.headers.get("location");
-        if (originalLocation) {
-          const rewrittenLocation = rewriteLocationHeader(originalLocation, streamType, isDownload);
-          res.setHeader("Location", rewrittenLocation);
-          return res.status(302).end();
-        }
-      }
-
-      // If origin responded with non-redirect (e.g. 200), we still redirect to rewritten target as load balancer
-      const rewrittenTargetUrl = rewriteLocationHeader(targetUrl.toString(), streamType, isDownload);
-      res.setHeader("Location", rewrittenTargetUrl);
-      return res.status(302).end();
-    } catch (err) {
-      console.error("Error in stream-handler download redirect:", err);
-      const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType, isDownload);
-      res.setHeader("Location", finalFallback);
-      return res.status(302).end();
-    }
+  } else if (isVodDownload) {
+    // 3. For VOD DOWNLOADS: Backend Translation - change `.mkv` back to `.mp4`
+    forwardStreamPath = streamPath.replace(/\.mkv$/i, ".mp4");
   }
 
   const targetIp = DEFAULT_MAIN_SERVER_IP || "149.18.66.28";
-  const targetUrl = new URL(`http://${targetIp}:8080/${streamType}/${streamPath}`);
+  const targetUrl = new URL(`http://${targetIp}:8080/${streamType}/${forwardStreamPath}`);
   
   // Forward query string parameters (excluding our internal rewrite keys)
   for (const [key, value] of Object.entries(req.query)) {
@@ -303,16 +265,11 @@ export default async function handler(req, res) {
     }
   }
 
-  const isM3u8 = streamPath.split("?")[0].toLowerCase().endsWith(".m3u8");
+  // Check if we are doing a standard .m3u8 playlist fetch-and-rewrite (VOD Streaming Only)
+  const isM3u8 = forwardStreamPath.split("?")[0].toLowerCase().endsWith(".m3u8");
 
-  if (isM3u8) {
+  if (isM3u8 && isVodStreaming) {
     try {
-      const forwardHeaders = {
-        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
-        "Accept": req.headers["accept"] || "*/*",
-        "X-Forwarded-For": req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || ""
-      };
-
       const response = await fetch(targetUrl.toString(), {
         method: "GET",
         headers: forwardHeaders,
@@ -320,8 +277,7 @@ export default async function handler(req, res) {
       });
 
       if (!response.ok) {
-        // redirection fallback if request failed
-        const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType);
+        const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType, false);
         res.setHeader("Location", finalFallback);
         return res.status(302).end();
       }
@@ -335,21 +291,14 @@ export default async function handler(req, res) {
       return res.status(200).send(rewrittenText);
     } catch (err) {
       console.error("Error in m3u8 playlist rewrite:", err);
-      // fallback to 302 redirect on exception
-      const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType);
+      const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType, false);
       res.setHeader("Location", finalFallback);
       return res.status(302).end();
     }
   }
 
-  // For media streaming (including chunk proxy and seeking range support)
+  // Handle stream proxying/redirects for LIVE TV, VOD Downloads, VOD Streaming
   try {
-    const forwardHeaders = {
-      "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
-      "Accept": req.headers["accept"] || "*/*",
-      "X-Forwarded-For": req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || ""
-    };
-
     if (req.headers["range"]) {
       forwardHeaders["Range"] = req.headers["range"];
     }
@@ -357,30 +306,32 @@ export default async function handler(req, res) {
     const response = await fetch(targetUrl.toString(), {
       method: "GET",
       headers: forwardHeaders,
-      redirect: "manual" // Prevent auto-following of redirects for raw TS/MP4 files to check redirect links
+      redirect: "manual" // Intercept redirect headers
     });
 
     if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
       const originalLocation = response.headers.get("location");
       if (originalLocation) {
-        const rewrittenLocation = rewriteLocationHeader(originalLocation, streamType, isDownload);
+        const rewrittenLocation = rewriteLocationHeader(originalLocation, streamType, isVodDownload);
         res.setHeader("Location", rewrittenLocation);
         return res.status(302).end();
       }
     }
 
-    // Forward byte-range / headers properly to handle partial media content
+    // Special fallback for VOD Downloads: if origin responded with non-redirect (e.g., 200), we redirect to rewritten target URL
+    if (isVodDownload) {
+      const rewrittenTargetUrl = rewriteLocationHeader(targetUrl.toString(), streamType, true);
+      res.setHeader("Location", rewrittenTargetUrl);
+      return res.status(302).end();
+    }
+
+    // Forward byte-range/headers for media streaming playback
     const copyHeaders = ["content-type", "content-length", "content-range", "accept-ranges"];
     for (const h of copyHeaders) {
       const val = response.headers.get(h);
       if (val) {
         res.setHeader(h, val);
       }
-    }
-
-    // Force Download Headers:
-    if (isDownload) {
-      res.setHeader("Content-Disposition", 'attachment; filename="video.mp4"');
     }
 
     res.status(response.status);
@@ -408,8 +359,7 @@ export default async function handler(req, res) {
     return res.end();
   } catch (err) {
     console.error("Error in stream-handler redirect intercept:", err);
-    // fallback on error
-    const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType, isDownload);
+    const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType, isVodDownload);
     res.setHeader("Location", finalFallback);
     return res.status(302).end();
   }
