@@ -13,17 +13,17 @@ const REDIRECT_MAP = {
   "149.18.66.28": "lb1.hdsj.store"
 };
 
-function rewriteLocationHeader(locationUrl, streamType = "live") {
+function rewriteLocationHeader(locationUrl, streamType = "live", isDownload = false) {
   if (!locationUrl) return locationUrl;
   let type = streamType;
-  if (locationUrl.includes("/movie/")) {
-    type = "movie";
-  } else if (locationUrl.includes("/series/")) {
-    type = "series";
-  } else if (locationUrl.includes("/live/")) {
-    type = "live";
-  } else if (!type) {
-    type = "live";
+  if (!type) {
+    if (locationUrl.includes("/movie/")) {
+      type = "movie";
+    } else if (locationUrl.includes("/series/")) {
+      type = "series";
+    } else if (locationUrl.includes("/live/")) {
+      type = "live";
+    }
   }
 
   try {
@@ -59,7 +59,17 @@ function rewriteLocationHeader(locationUrl, streamType = "live") {
     let pathname = urlObj.pathname;
     const isVod = (type === "movie" || type === "series");
     
-    if (isVod) {
+    if (isVod && isDownload) {
+      // Forcefully preserve or rewrite the file extension inside urlObj.pathname to .mkv
+      if (!pathname.toLowerCase().endsWith(".mkv")) {
+        const extRegex = /\.[a-zA-Z0-9]+$/i;
+        if (extRegex.test(pathname)) {
+          pathname = pathname.replace(extRegex, ".mkv");
+        } else {
+          pathname = pathname + ".mkv";
+        }
+      }
+    } else if (isVod) {
       // Forcefully rewrite the file extension inside urlObj.pathname to .m3u8
       if (!pathname.toLowerCase().endsWith(".m3u8")) {
         const extRegex = /\.[a-zA-Z0-9]+$/i;
@@ -102,7 +112,16 @@ function rewriteLocationHeader(locationUrl, streamType = "live") {
       const queryParts = modified.split("?");
       let beforeQuery = queryParts[0];
       
-      if (isVod) {
+      if (isVod && isDownload) {
+        if (!beforeQuery.toLowerCase().endsWith(".mkv")) {
+          const extRegex = /\.[a-zA-Z0-9]+$/i;
+          if (extRegex.test(beforeQuery)) {
+            beforeQuery = beforeQuery.replace(extRegex, ".mkv");
+          } else {
+            beforeQuery = beforeQuery + ".mkv";
+          }
+        }
+      } else if (isVod) {
         if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
           const extRegex = /\.[a-zA-Z0-9]+$/i;
           if (extRegex.test(beforeQuery)) {
@@ -163,16 +182,12 @@ function rewriteM3u8Content(text) {
 
 function rewriteStreamExtensionsInText(text) {
   if (!text) return text;
-  // Strict separation: ONLY rewrite /movie/ and /series/ paths to .m3u8. Preserve/force .ts for /live/ paths.
-  const regex = /(\\?\/)(live|movie|series)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
+  // This matches both "/live/user/pass/123" and "\/live\/user\/pass\/123" (with or without extension)
+  const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
   return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
     if (type === "movie" || type === "series") {
       return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
     } else {
-      const currentExt = ext ? ext.toLowerCase() : "";
-      if (currentExt === ".m3u8") {
-        return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.ts`;
-      }
       return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
     }
   });
@@ -210,6 +225,16 @@ export default async function handler(req, res) {
     streamPath = streamPath + ".ts";
   }
 
+  // Force Download Logic:
+  // Bypass Auto-HLS for Downloads: If an incoming request for a Movie or Series ends with .mkv, DO NOT convert it to .m3u8.
+  const isDownload = pathPartClean.endsWith(".mkv") && (streamType === "movie" || streamType === "series");
+  
+  if (isDownload) {
+    // Backend Translation: change the .mkv extension back to .mp4 (so the origin server responds correctly)
+    const mkvRegex = /\.mkv$/i;
+    streamPath = streamPath.replace(mkvRegex, ".mp4");
+  }
+
   const targetIp = DEFAULT_MAIN_SERVER_IP || "149.18.66.28";
   const targetUrl = new URL(`http://${targetIp}:8080/${streamType}/${streamPath}`);
   
@@ -224,7 +249,7 @@ export default async function handler(req, res) {
     }
   }
 
-  const isM3u8 = streamPath.split("?")[0].toLowerCase().endsWith(".m3u8") && streamType !== "live";
+  const isM3u8 = streamPath.split("?")[0].toLowerCase().endsWith(".m3u8");
 
   if (isM3u8) {
     try {
@@ -284,7 +309,7 @@ export default async function handler(req, res) {
     if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
       const originalLocation = response.headers.get("location");
       if (originalLocation) {
-        const rewrittenLocation = rewriteLocationHeader(originalLocation, streamType);
+        const rewrittenLocation = rewriteLocationHeader(originalLocation, streamType, isDownload);
         res.setHeader("Location", rewrittenLocation);
         return res.status(302).end();
       }
@@ -297,6 +322,11 @@ export default async function handler(req, res) {
       if (val) {
         res.setHeader(h, val);
       }
+    }
+
+    // Force Download Headers:
+    if (isDownload) {
+      res.setHeader("Content-Disposition", 'attachment; filename="video.mp4"');
     }
 
     res.status(response.status);
@@ -325,7 +355,7 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("Error in stream-handler redirect intercept:", err);
     // fallback on error
-    const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType);
+    const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType, isDownload);
     res.setHeader("Location", finalFallback);
     return res.status(302).end();
   }
