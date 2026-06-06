@@ -16,14 +16,14 @@ const REDIRECT_MAP = {
 function rewriteLocationHeader(locationUrl, streamType = "live") {
   if (!locationUrl) return locationUrl;
   let type = streamType;
-  if (!type) {
-    if (locationUrl.includes("/movie/")) {
-      type = "movie";
-    } else if (locationUrl.includes("/series/")) {
-      type = "series";
-    } else if (locationUrl.includes("/live/")) {
-      type = "live";
-    }
+  if (locationUrl.includes("/movie/")) {
+    type = "movie";
+  } else if (locationUrl.includes("/series/")) {
+    type = "series";
+  } else if (locationUrl.includes("/live/")) {
+    type = "live";
+  } else if (!type) {
+    type = "live";
   }
 
   try {
@@ -163,12 +163,16 @@ function rewriteM3u8Content(text) {
 
 function rewriteStreamExtensionsInText(text) {
   if (!text) return text;
-  // This matches both "/live/user/pass/123" and "\/live\/user\/pass\/123" (with or without extension)
-  const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
+  // Strict separation: ONLY rewrite /movie/ and /series/ paths to .m3u8. Preserve/force .ts for /live/ paths.
+  const regex = /(\\?\/)(live|movie|series)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
   return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
     if (type === "movie" || type === "series") {
       return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
     } else {
+      const currentExt = ext ? ext.toLowerCase() : "";
+      if (currentExt === ".m3u8") {
+        return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.ts`;
+      }
       return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
     }
   });
@@ -220,7 +224,7 @@ export default async function handler(req, res) {
     }
   }
 
-  const isM3u8 = streamPath.split("?")[0].toLowerCase().endsWith(".m3u8");
+  const isM3u8 = streamPath.split("?")[0].toLowerCase().endsWith(".m3u8") && streamType !== "live";
 
   if (isM3u8) {
     try {

@@ -16,12 +16,16 @@ function getRandomLb() {
 
 function rewriteStreamExtensionsInText(text) {
   if (!text) return text;
-  // This matches both "/live/user/pass/123" and "\/live\/user\/pass\/123" (with or without extension)
-  const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
+  // Strict separation: ONLY rewrite /movie/ and /series/ paths to .m3u8. Preserve/force .ts for /live/ paths.
+  const regex = /(\\?\/)(live|movie|series)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
   return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
     if (type === "movie" || type === "series") {
       return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
     } else {
+      const currentExt = ext ? ext.toLowerCase() : "";
+      if (currentExt === ".m3u8") {
+        return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.ts`;
+      }
       return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
     }
   });
