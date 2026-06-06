@@ -161,6 +161,19 @@ function rewriteM3u8Content(text) {
   return rewritten;
 }
 
+function rewriteStreamExtensionsInText(text) {
+  if (!text) return text;
+  // This matches both "/live/user/pass/123" and "\/live\/user\/pass\/123" (with or without extension)
+  const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
+  return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
+    if (type === "movie" || type === "series") {
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
+    } else {
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
+    }
+  });
+}
+
 export default async function handler(req, res) {
   // CORS Headers
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -213,7 +226,8 @@ export default async function handler(req, res) {
     try {
       const forwardHeaders = {
         "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
-        "Accept": req.headers["accept"] || "*/*"
+        "Accept": req.headers["accept"] || "*/*",
+        "X-Forwarded-For": req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || ""
       };
 
       const response = await fetch(targetUrl.toString(), {
@@ -249,7 +263,8 @@ export default async function handler(req, res) {
   try {
     const forwardHeaders = {
       "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
-      "Accept": req.headers["accept"] || "*/*"
+      "Accept": req.headers["accept"] || "*/*",
+      "X-Forwarded-For": req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || ""
     };
 
     if (req.headers["range"]) {

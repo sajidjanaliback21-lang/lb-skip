@@ -19,6 +19,19 @@ function getRandomLb() {
   return LBS[Math.floor(Math.random() * LBS.length)];
 }
 
+function rewriteStreamExtensionsInText(text: string): string {
+  if (!text) return text;
+  // This matches both "/live/user/pass/123" and "\/live\/user\/pass\/123" (with or without extension)
+  const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
+  return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
+    if (type === "movie" || type === "series") {
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
+    } else {
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
+    }
+  });
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -147,6 +160,7 @@ const handlePlaylistRewrite = async (req: express.Request, res: express.Response
       "User-Agent": userAgent.includes("iptv") || userAgent.includes("vlc") 
         ? req.headers["user-agent"] as string
         : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "X-Forwarded-For": (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || "") as string,
     };
 
     // Forwarding specific authorization headers or content-type preferences if proxying
@@ -215,6 +229,9 @@ const handlePlaylistRewrite = async (req: express.Request, res: express.Response
     res.setHeader("X-Rewritten-Count", replacementTotal.toString());
     res.setHeader("X-Rewritten-Time-Ms", elapsedMs.toString());
 
+    // Rewrite stream extensions in the final response text safely
+    rewritten = rewriteStreamExtensionsInText(rewritten);
+
     return res.status(200).send(rewritten);
   } catch (error: any) {
     console.error("Rewrite error:", error);
@@ -244,6 +261,7 @@ const handleXtreamProxy = async (req: express.Request, res: express.Response) =>
     const forwardHeaders: { [key: string]: string } = {
       "User-Agent": (req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer") as string,
       "Accept": (req.headers["accept"] || "*/*") as string,
+      "X-Forwarded-For": (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || "") as string,
     };
 
     if (req.headers["authorization"]) {
@@ -355,6 +373,9 @@ const handleXtreamProxy = async (req: express.Request, res: express.Response) =>
     res.setHeader("Content-Type", contentType);
     res.setHeader("X-Replacement-Count", replacementCount.toString());
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+    // Rewrite stream extensions in the final response text safely
+    rewrittenText = rewriteStreamExtensionsInText(rewrittenText);
 
     return res.status(response.status).send(rewrittenText);
   } catch (error: any) {
@@ -562,7 +583,8 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
     try {
       const forwardHeaders = {
         "User-Agent": (req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer") as string,
-        "Accept": (req.headers["accept"] || "*/*") as string
+        "Accept": (req.headers["accept"] || "*/*") as string,
+        "X-Forwarded-For": (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || "") as string
       };
 
       const response = await fetch(targetUrl.toString(), {
@@ -597,7 +619,8 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
   try {
     const forwardHeaders: Record<string, string> = {
       "User-Agent": (req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer") as string,
-      "Accept": (req.headers["accept"] || "*/*") as string
+      "Accept": (req.headers["accept"] || "*/*") as string,
+      "X-Forwarded-For": (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || "") as string
     };
 
     if (req.headers["range"]) {

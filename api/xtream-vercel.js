@@ -14,6 +14,19 @@ function getRandomLb() {
   return LBS[Math.floor(Math.random() * LBS.length)];
 }
 
+function rewriteStreamExtensionsInText(text) {
+  if (!text) return text;
+  // This matches both "/live/user/pass/123" and "\/live\/user\/pass\/123" (with or without extension)
+  const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
+  return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
+    if (type === "movie" || type === "series") {
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
+    } else {
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
+    }
+  });
+}
+
 export default async function handler(req, res) {
   // Set CORS headers so standard IPTV players don't face browser-level restrictions
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -43,6 +56,7 @@ export default async function handler(req, res) {
     const forwardHeaders = {
       "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer",
       "Accept": req.headers["accept"] || "*/*",
+      "X-Forwarded-For": req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || ""
     };
 
     // Forward Authorization if present
@@ -163,6 +177,9 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type", contentType);
     res.setHeader("X-Replacement-Count", replacementCount.toString());
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+    // Rewrite stream extensions in the final response text safely
+    rewrittenText = rewriteStreamExtensionsInText(rewrittenText);
 
     return res.status(response.status).send(rewrittenText);
 

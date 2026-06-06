@@ -30,6 +30,7 @@ export default async function handler(req, res) {
       "User-Agent": userAgent.includes("iptv") || userAgent.includes("vlc") 
         ? req.headers["user-agent"]
         : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "X-Forwarded-For": req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.connection?.remoteAddress || ""
     };
 
     if (req.headers["accept"]) headers["Accept"] = req.headers["accept"];
@@ -75,6 +76,9 @@ export default async function handler(req, res) {
     res.setHeader("X-Rewritten-Count", replacementTotal.toString());
     res.setHeader("X-Rewritten-Time-Ms", elapsedMs.toString());
 
+    // Rewrite stream extensions in the final response text safely
+    rewritten = rewriteStreamExtensionsInText(rewritten);
+
     return res.status(200).send(rewritten);
   } catch (error) {
     console.error("Rewrite error:", error);
@@ -85,4 +89,17 @@ export default async function handler(req, res) {
       `#ORIGINAL PLAYLIST SOURCE: ${playlistUrl}`
     );
   }
+}
+
+function rewriteStreamExtensionsInText(text) {
+  if (!text) return text;
+  // This matches both "/live/user/pass/123" and "\/live\/user\/pass\/123" (with or without extension)
+  const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
+  return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
+    if (type === "movie" || type === "series") {
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
+    } else {
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
+    }
+  });
 }
