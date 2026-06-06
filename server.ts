@@ -411,6 +411,19 @@ function rewriteLocationHeader(locationUrl: string): string {
         matched = true;
       }
     }
+
+    // Forcefully rewrite the file extension inside urlObj.pathname to .m3u8
+    let pathname = urlObj.pathname;
+    if (!pathname.toLowerCase().endsWith(".m3u8")) {
+      const extRegex = /\.[a-zA-Z0-9]+$/i;
+      if (extRegex.test(pathname)) {
+        pathname = pathname.replace(extRegex, ".m3u8");
+      } else {
+        pathname = pathname + ".m3u8";
+      }
+    }
+    urlObj.pathname = pathname;
+
     return urlObj.toString();
   } catch (err) {
     let modified = locationUrl;
@@ -424,6 +437,23 @@ function rewriteLocationHeader(locationUrl: string): string {
         modified = modified.replace("http://", "https://");
       }
     }
+
+    // Fallback string manipulation to ensure .m3u8 extension in error catch block
+    try {
+      const queryParts = modified.split("?");
+      let beforeQuery = queryParts[0];
+      if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
+        const extRegex = /\.[a-zA-Z0-9]+$/i;
+        if (extRegex.test(beforeQuery)) {
+          beforeQuery = beforeQuery.replace(extRegex, ".m3u8");
+        } else {
+          beforeQuery = beforeQuery + ".m3u8";
+        }
+      }
+      queryParts[0] = beforeQuery;
+      modified = queryParts.join("?");
+    } catch (e) {}
+
     return modified;
   }
 }
