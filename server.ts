@@ -370,10 +370,255 @@ app.all("/player_api.php", handleXtreamProxy);
 app.all("/get.php", handleXtreamProxy);
 app.all("/xmltv.php", handleXtreamProxy);
 
-// Express stream wildcard redirect interceptor - returning 404 for media routes
+// Express stream wildcard redirect interceptor
+const REDIRECT_MAP = {
+  "103.169.98.238": "lb1.hdsj.store",
+  "45.148.147.213": "lb2.hdsj.store",
+  "45.88.0.176": "lb3.hdsj.store",
+  "181.215.178.154": "lb4.hdsj.store",
+  "45.159.92.158": "lb5.hdsj.store",
+  "181.215.178.23": "lb6.hdsj.store",
+  "149.18.66.28": "lb1.hdsj.store"
+};
+
+function rewriteLocationHeader(locationUrl: string): string {
+  if (!locationUrl) return locationUrl;
+  try {
+    const urlObj = new URL(locationUrl);
+    const host = urlObj.hostname;
+    
+    let matched = false;
+    if (REDIRECT_MAP[host as keyof typeof REDIRECT_MAP]) {
+      urlObj.hostname = REDIRECT_MAP[host as keyof typeof REDIRECT_MAP];
+      urlObj.port = "";
+      urlObj.protocol = "https:";
+      matched = true;
+    } else {
+      for (const [ip, domain] of Object.entries(REDIRECT_MAP)) {
+        if (host === ip) {
+          urlObj.hostname = domain;
+          urlObj.port = "";
+          urlObj.protocol = "https:";
+          matched = true;
+          break;
+        }
+      }
+      if (!matched && (host === "149.18.66.28" || host === "45.142.0.21" || host.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/))) {
+        const mappedDomain = REDIRECT_MAP[host as keyof typeof REDIRECT_MAP] || REDIRECT_MAP["149.18.66.28"];
+        urlObj.hostname = mappedDomain;
+        urlObj.port = "";
+        urlObj.protocol = "https:";
+        matched = true;
+      }
+    }
+
+    // Forcefully rewrite the file extension inside urlObj.pathname to .m3u8
+    let pathname = urlObj.pathname;
+    if (!pathname.toLowerCase().endsWith(".m3u8")) {
+      const extRegex = /\.[a-zA-Z0-9]+$/i;
+      if (extRegex.test(pathname)) {
+        pathname = pathname.replace(extRegex, ".m3u8");
+      } else {
+        pathname = pathname + ".m3u8";
+      }
+    }
+    urlObj.pathname = pathname;
+
+    return urlObj.toString();
+  } catch (err) {
+    let modified = locationUrl;
+    for (const [ip, domain] of Object.entries(REDIRECT_MAP)) {
+      modified = modified.replace(new RegExp(`${ip}:8080`, "g"), domain);
+      modified = modified.replace(new RegExp(`${ip}:\\d+`, "g"), domain);
+      modified = modified.replace(new RegExp(ip, "g"), domain);
+    }
+    for (const domain of Object.values(REDIRECT_MAP)) {
+      if (modified.includes(domain)) {
+        modified = modified.replace("http://", "https://");
+      }
+    }
+
+    // Fallback string manipulation to ensure .m3u8 extension in error catch block
+    try {
+      const queryParts = modified.split("?");
+      let beforeQuery = queryParts[0];
+      if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
+        const extRegex = /\.[a-zA-Z0-9]+$/i;
+        if (extRegex.test(beforeQuery)) {
+          beforeQuery = beforeQuery.replace(extRegex, ".m3u8");
+        } else {
+          beforeQuery = beforeQuery + ".m3u8";
+        }
+      }
+      queryParts[0] = beforeQuery;
+      modified = queryParts.join("?");
+    } catch (e) {}
+
+    return modified;
+  }
+}
+
+function rewriteM3u8Content(text: string): string {
+  if (!text) return text;
+  let rewritten = text;
+  
+  // Replace target IPs with their subdomain counterparts, and handle ports & protocol
+  for (const [ip, domain] of Object.entries(REDIRECT_MAP)) {
+    const escapedIp = ip.replace(/\./g, "\\.");
+    
+    // Replace http://ip:8080 or http://ip with https://domain
+    rewritten = rewritten.replace(new RegExp(`http://${escapedIp}(:\\d+)?`, "g"), `https://${domain}`);
+    rewritten = rewritten.replace(new RegExp(`https://${escapedIp}(:\\d+)?`, "g"), `https://${domain}`);
+    
+    // Default fallback replacement for any residual IP occurrences
+    rewritten = rewritten.replace(new RegExp(escapedIp, "g"), domain);
+  }
+  
+  // Strip any residual port 8080 or other port from the load balancer domains if they were somehow left over
+  for (const domain of Object.values(REDIRECT_MAP)) {
+    const escapedDomain = domain.replace(/\./g, "\\.");
+    const residualPortRegex = new RegExp(`${escapedDomain}:\\d+`, "g");
+    rewritten = rewritten.replace(residualPortRegex, domain);
+  }
+  
+  // Force secure https protocol for all of our custom domains
+  for (const domain of Object.values(REDIRECT_MAP)) {
+    const httpRegex = new RegExp(`http://${domain.replace(/\./g, "\\.")}`, "g");
+    rewritten = rewritten.replace(httpRegex, `https://${domain}`);
+  }
+
+  return rewritten;
+}
+
 const handleStreamRedirect = async (req: express.Request, res: express.Response) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  return res.status(404).send("Not Found");
+
+  const pathParts = req.path.split("/");
+  // pathParts will look like ["", "live", "user", "pass", "123.ts"] or similar
+  const streamType = pathParts[1]; // "live" | "movie" | "series"
+  let streamPath = pathParts.slice(2).join("/");
+
+  if (!streamType || !streamPath) {
+    return res.status(400).send("Bad request parameters.");
+  }
+
+  // Extension Fallback Check: check if the request path has a media extension
+  const pathPartClean = streamPath.split("?")[0].toLowerCase();
+  const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                            pathPartClean.endsWith(".mp4") || 
+                            pathPartClean.endsWith(".mkv") || 
+                            pathPartClean.endsWith(".m3u8");
+  if (!hasMediaExtension && streamType === "live") {
+    streamPath = streamPath + ".ts";
+  }
+
+  const targetUrl = new URL(`http://${DEFAULT_MAIN_SERVER_IP}:8080/${streamType}/${streamPath}`);
+  for (const [key, value] of Object.entries(req.query)) {
+    targetUrl.searchParams.set(key, String(value));
+  }
+
+  const isM3u8 = streamPath.split("?")[0].toLowerCase().endsWith(".m3u8");
+
+  if (isM3u8) {
+    try {
+      const forwardHeaders = {
+        "User-Agent": (req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer") as string,
+        "Accept": (req.headers["accept"] || "*/*") as string
+      };
+
+      const response = await fetch(targetUrl.toString(), {
+        method: "GET",
+        headers: forwardHeaders,
+        redirect: "follow" // Follow redirects to get real m3u8 playlist file
+      });
+
+      if (!response.ok) {
+        // Redirection fallback if request failed
+        const finalFallback = rewriteLocationHeader(targetUrl.toString());
+        res.setHeader("Location", finalFallback);
+        return res.status(302).end();
+      }
+
+      const text = await response.text();
+      const rewrittenText = rewriteM3u8Content(text);
+
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Content-Length", Buffer.byteLength(rewrittenText).toString());
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      return res.status(200).send(rewrittenText);
+    } catch (err) {
+      console.error("Error in server m3u8 playlist rewrite:", err);
+      // fallback to 302 redirect on exception
+      const finalFallback = rewriteLocationHeader(targetUrl.toString());
+      res.setHeader("Location", finalFallback);
+      return res.status(302).end();
+    }
+  }
+
+  try {
+    const forwardHeaders: Record<string, string> = {
+      "User-Agent": (req.headers["user-agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer") as string,
+      "Accept": (req.headers["accept"] || "*/*") as string
+    };
+
+    if (req.headers["range"]) {
+      forwardHeaders["Range"] = req.headers["range"] as string;
+    }
+
+    const response = await fetch(targetUrl.toString(), {
+      method: "GET",
+      headers: forwardHeaders,
+      redirect: "manual" // Prevent auto-following of redirects for raw TS/MP4 to check redirect links
+    });
+
+    if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
+      const originalLocation = response.headers.get("location");
+      if (originalLocation) {
+        const rewrittenLocation = rewriteLocationHeader(originalLocation);
+        res.setHeader("Location", rewrittenLocation);
+        return res.status(302).end();
+      }
+    }
+
+    // Forward byte-range / headers properly to handle partial media content
+    const copyHeaders = ["content-type", "content-length", "content-range", "accept-ranges"];
+    for (const h of copyHeaders) {
+      const val = response.headers.get(h);
+      if (val) {
+        res.setHeader(h, val);
+      }
+    }
+
+    res.status(response.status);
+
+    if (response.body) {
+      if (typeof (response.body as any).getReader === "function") {
+        const reader = (response.body as any).getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      } else if (typeof (response.body as any).pipe === "function") {
+        (response.body as any).pipe(res);
+        return;
+      } else {
+        const buffer = await response.arrayBuffer();
+        res.write(Buffer.from(buffer));
+      }
+    }
+    return res.end();
+  } catch (err) {
+    console.error("Error in stream-handler redirect intercept:", err);
+    // fallback on error
+    const finalFallback = rewriteLocationHeader(targetUrl.toString());
+    res.setHeader("Location", finalFallback);
+    return res.status(302).end();
+  }
 };
 
 app.all("/live/*", handleStreamRedirect);
