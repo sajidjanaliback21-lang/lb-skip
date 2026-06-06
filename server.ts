@@ -381,8 +381,19 @@ const REDIRECT_MAP = {
   "149.18.66.28": "lb1.hdsj.store"
 };
 
-function rewriteLocationHeader(locationUrl: string): string {
+function rewriteLocationHeader(locationUrl: string, streamType: string = "live"): string {
   if (!locationUrl) return locationUrl;
+  let type = streamType;
+  if (!type) {
+    if (locationUrl.includes("/movie/")) {
+      type = "movie";
+    } else if (locationUrl.includes("/series/")) {
+      type = "series";
+    } else if (locationUrl.includes("/live/")) {
+      type = "live";
+    }
+  }
+
   try {
     const urlObj = new URL(locationUrl);
     const host = urlObj.hostname;
@@ -412,14 +423,29 @@ function rewriteLocationHeader(locationUrl: string): string {
       }
     }
 
-    // Forcefully rewrite the file extension inside urlObj.pathname to .m3u8
+    // Rewrite path file extension depending on stream type
     let pathname = urlObj.pathname;
-    if (!pathname.toLowerCase().endsWith(".m3u8")) {
-      const extRegex = /\.[a-zA-Z0-9]+$/i;
-      if (extRegex.test(pathname)) {
-        pathname = pathname.replace(extRegex, ".m3u8");
-      } else {
-        pathname = pathname + ".m3u8";
+    const isVod = (type === "movie" || type === "series");
+    
+    if (isVod) {
+      // Forcefully rewrite the file extension inside urlObj.pathname to .m3u8
+      if (!pathname.toLowerCase().endsWith(".m3u8")) {
+        const extRegex = /\.[a-zA-Z0-9]+$/i;
+        if (extRegex.test(pathname)) {
+          pathname = pathname.replace(extRegex, ".m3u8");
+        } else {
+          pathname = pathname + ".m3u8";
+        }
+      }
+    } else {
+      // Live TV: Do NOT force .m3u8. If no media extension is present, append .ts
+      const pathPartClean = pathname.split("?")[0].toLowerCase();
+      const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                                pathPartClean.endsWith(".mp4") || 
+                                pathPartClean.endsWith(".mkv") || 
+                                pathPartClean.endsWith(".m3u8");
+      if (!hasMediaExtension) {
+        pathname = pathname + ".ts";
       }
     }
     urlObj.pathname = pathname;
@@ -438,16 +464,29 @@ function rewriteLocationHeader(locationUrl: string): string {
       }
     }
 
-    // Fallback string manipulation to ensure .m3u8 extension in error catch block
+    // Fallback string manipulation to ensure correct extension in error catch block
     try {
+      const isVod = (type === "movie" || type === "series");
       const queryParts = modified.split("?");
       let beforeQuery = queryParts[0];
-      if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
-        const extRegex = /\.[a-zA-Z0-9]+$/i;
-        if (extRegex.test(beforeQuery)) {
-          beforeQuery = beforeQuery.replace(extRegex, ".m3u8");
-        } else {
-          beforeQuery = beforeQuery + ".m3u8";
+      
+      if (isVod) {
+        if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
+          const extRegex = /\.[a-zA-Z0-9]+$/i;
+          if (extRegex.test(beforeQuery)) {
+            beforeQuery = beforeQuery.replace(extRegex, ".m3u8");
+          } else {
+            beforeQuery = beforeQuery + ".m3u8";
+          }
+        }
+      } else {
+        const pathPartClean = beforeQuery.toLowerCase();
+        const hasMediaExtension = pathPartClean.endsWith(".ts") || 
+                                  pathPartClean.endsWith(".mp4") || 
+                                  pathPartClean.endsWith(".mkv") || 
+                                  pathPartClean.endsWith(".m3u8");
+        if (!hasMediaExtension) {
+          beforeQuery = beforeQuery + ".ts";
         }
       }
       queryParts[0] = beforeQuery;
@@ -534,7 +573,7 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
 
       if (!response.ok) {
         // Redirection fallback if request failed
-        const finalFallback = rewriteLocationHeader(targetUrl.toString());
+        const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType);
         res.setHeader("Location", finalFallback);
         return res.status(302).end();
       }
@@ -549,7 +588,7 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
     } catch (err) {
       console.error("Error in server m3u8 playlist rewrite:", err);
       // fallback to 302 redirect on exception
-      const finalFallback = rewriteLocationHeader(targetUrl.toString());
+      const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType);
       res.setHeader("Location", finalFallback);
       return res.status(302).end();
     }
@@ -574,7 +613,7 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
     if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
       const originalLocation = response.headers.get("location");
       if (originalLocation) {
-        const rewrittenLocation = rewriteLocationHeader(originalLocation);
+        const rewrittenLocation = rewriteLocationHeader(originalLocation, streamType);
         res.setHeader("Location", rewrittenLocation);
         return res.status(302).end();
       }
@@ -615,7 +654,7 @@ const handleStreamRedirect = async (req: express.Request, res: express.Response)
   } catch (err) {
     console.error("Error in stream-handler redirect intercept:", err);
     // fallback on error
-    const finalFallback = rewriteLocationHeader(targetUrl.toString());
+    const finalFallback = rewriteLocationHeader(targetUrl.toString(), streamType);
     res.setHeader("Location", finalFallback);
     return res.status(302).end();
   }
