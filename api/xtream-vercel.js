@@ -4,7 +4,7 @@ import { INITIAL_MAPPINGS, DEFAULT_MAIN_SERVER_IP } from "../src/lb-mapping.js";
 const LBS = [
   "lb1.hdsj.store",
   "lb2.hdsj.store",
-  "lb3.hdsj.store",
+  "lb3sj.hdsj.store",
   "lb4.hdsj.store",
   "lb5.hdsj.store",
   "lb6.hdsj.store"
