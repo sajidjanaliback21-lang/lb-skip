@@ -208,8 +208,34 @@ export default async function handler(req, res) {
   const pathPartClean = streamPath.split("?")[0].toLowerCase();
   
   const isLive = streamType === "live";
-  const isVodDownload = (streamType === "movie" || streamType === "series") && pathPartClean.endsWith(".mkv");
-  const isVodStreaming = (streamType === "movie" || streamType === "series") && !pathPartClean.endsWith(".mkv");
+  const isVodDownload = (streamType === "movie" || streamType === "series") && (pathPartClean.endsWith(".mkv") || req.query.download === "true");
+  const isVodStreaming = (streamType === "movie" || streamType === "series") && !pathPartClean.endsWith(".mkv") && req.query.download !== "true";
+
+  // Directly redirect .mkv requests to .mp4 with download=true to prevent body/path mangling
+  if ((streamType === "movie" || streamType === "series") && pathPartClean.endsWith(".mkv")) {
+    const requestedHost = req.headers.host || "lb3sj.hdsj.store";
+    const protocol = req.headers["x-forwarded-proto"] || "https";
+    
+    let cleanPath = "/" + streamType + "/" + streamPath;
+    cleanPath = cleanPath.replace(/\.mkv$/i, ".mp4");
+    
+    const queryParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(req.query)) {
+      if (key !== "streamType" && key !== "path" && key !== "customDomain") {
+        if (Array.isArray(value)) {
+          queryParams.set(key, String(value[0]));
+        } else {
+          queryParams.set(key, String(value));
+        }
+      }
+    }
+    queryParams.set("download", "true");
+    
+    const redirectedUrl = `${protocol}://${requestedHost}${cleanPath}?${queryParams.toString()}`;
+    res.setHeader("Location", redirectedUrl);
+    res.status(302).end();
+    return;
+  }
 
   // Determine headers to proxy.
   // ALWAYS pass client's real IP (X-Forwarded-For) to Main Server.
