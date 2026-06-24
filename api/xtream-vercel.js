@@ -20,7 +20,7 @@ function rewriteStreamExtensionsInText(text) {
   const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
   return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
     if (type === "movie" || type === "series") {
-      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".mp4"}`;
     } else {
       return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
     }

@@ -25,7 +25,7 @@ function rewriteStreamExtensionsInText(text: string): string {
   const regex = /(\\?\/)((?:live|movie|series))(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"']+)(\\?\/)([^\/\\\?\s"'\.]+)(\.[a-zA-Z0-9]+)?/g;
   return text.replace(regex, (match, s1, type, s2, username, s3, password, s4, streamId, ext) => {
     if (type === "movie" || type === "series") {
-      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}.m3u8`;
+      return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".mp4"}`;
     } else {
       return `${s1}${type}${s2}${username}${s3}${password}${s4}${streamId}${ext || ".ts"}`;
     }
@@ -469,15 +469,7 @@ function rewriteLocationHeader(locationUrl: string, streamType: string = "live",
       }
       urlObj.searchParams.set("download", "true");
     } else {
-      // 2. For VOD STREAMING: Force Auto-HLS (ALWAYS replace extension in final Location redirect to .m3u8). DO NOT append download=true.
-      if (!pathname.toLowerCase().endsWith(".m3u8")) {
-        const extRegex = /\.[a-zA-Z0-9]+$/i;
-        if (extRegex.test(pathname)) {
-          pathname = pathname.replace(extRegex, ".m3u8");
-        } else {
-          pathname = pathname + ".m3u8";
-        }
-      }
+      // 2. For VOD STREAMING: Preserve the EXACT path and filename returned by the Main Server's Location header. DO NOT append download=true.
       urlObj.searchParams.delete("download");
     }
 
@@ -523,14 +515,7 @@ function rewriteLocationHeader(locationUrl: string, streamType: string = "live",
         }
         queryParams.set("download", "true");
       } else {
-        if (!beforeQuery.toLowerCase().endsWith(".m3u8")) {
-          const extRegex = /\.[a-zA-Z0-9]+$/i;
-          if (extRegex.test(beforeQuery)) {
-            beforeQuery = beforeQuery.replace(extRegex, ".m3u8");
-          } else {
-            beforeQuery = beforeQuery + ".m3u8";
-          }
-        }
+        // VOD STREAMING: Preserve the exact extension and path, do not force .m3u8
         queryParams.delete("download");
       }
 
